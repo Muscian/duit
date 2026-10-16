@@ -1,3 +1,4 @@
+import "../load-env.js";
 import { readFile } from "node:fs/promises";
 import { parse } from "yaml";
 import { z } from "zod";

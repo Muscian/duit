@@ -11,12 +11,11 @@ Requires Node.js 22 or later and a [TypeSafe](https://console.typesafe.ai) API k
 ```bash
 npm ci
 npx playwright install --with-deps chromium
-export JEV_API_KEY='your-key'
-export DEMO_PASSWORD='demo123'
+cp .env.example .env   # then set JEV_API_KEY
 npm run demo
 ```
 
-In another terminal, with the same environment variables:
+In another terminal:
 
 ```bash
 npm run duit -- run examples/checkout.es.yaml
@@ -88,9 +87,8 @@ Each run creates a directory that **must not already exist**, containing:
 - `trace.zip`: only with `--trace`, for Playwright Trace Viewer.
 
 ```bash
-# Reuse the directory from a previous run:
-export EMAIL='ana@example.com'
-export DEMO_PASSWORD='demo123'
+# Reuse the directory from a previous run. Values come from .env
+# (EMAIL, DEMO_PASSWORD, …) unless already set in the environment:
 npm run duit -- replay artifacts/<run>/replay.json
 npx playwright show-trace artifacts/<run>/trace.zip
 ```
@@ -103,7 +101,7 @@ Exit codes: `0` passed, `1` action/assertion failed, `2` blocked/configuration e
 
 | Setting                          | Default                                                         |
 | -------------------------------- | --------------------------------------------------------------- |
-| `JEV_API_KEY`                    | Required only in live mode                                      |
+| `JEV_API_KEY`                    | Required only in live mode. Read from the environment, or from `.env` at the repository root when unset |
 | `JEV_MODEL`                      | `jev-1.14.0`, pinned version                                    |
 | `JEV_ENDPOINT`                   | `https://api.typesafe.ai/v1/systemone`                          |
 | `DUIT_BROWSER_PROXY` / `--proxy` | Direct browser connection                                       |

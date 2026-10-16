@@ -1,3 +1,4 @@
+import "../load-env.js";
 import {
   chromium,
   firefox,

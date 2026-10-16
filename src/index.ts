@@ -1,3 +1,5 @@
+import "./load-env.js";
+
 export * from "./core/types.js";
 export * from "./core/input.js";
 export * from "./core/decisions.js";

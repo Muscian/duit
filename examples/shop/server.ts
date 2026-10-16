@@ -1,3 +1,4 @@
+import "../../src/load-env.js";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";

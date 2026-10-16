@@ -1,3 +1,4 @@
+import "../load-env.js";
 import { fetch, EnvHttpProxyAgent } from "undici";
 import { z } from "zod";
 import {

@@ -1,3 +1,4 @@
+import "../load-env.js";
 import { mkdir } from "node:fs/promises";
 import { resolve, join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";

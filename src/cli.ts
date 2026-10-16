@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "./load-env.js";
 import { parseArgs } from "node:util";
 import { readFile, mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
