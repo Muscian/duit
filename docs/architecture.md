@@ -1,47 +1,47 @@
-# Diseño del harness
+# Harness design
 
-## Contratos
+## Contracts
 
-- `DecisionProvider.decide(state, questions, signal)` devuelve respuestas Choice tipadas. `JevProvider` implementa el protocolo oficial `POST /v1/systemone`, valida el esquema y que cada elección pertenezca a los criterios, comprueba distribuciones y controla timeouts/reintentos. El transporte sólo conoce la API de TypeSafe.
-- `DecisionEngine` clasifica pasos en lotes de hasta ocho, elige literales y resuelve elementos. Usa opciones `unsupported`/`none`, nunca un fallback generativo. Registra la petición redactada y la respuesta, lo que permite auditar las alternativas y calibrar la política con casos propios.
-- `PlatformAdapter` abre la plataforma, observa candidatos, ejecuta acciones y genera evidencia. `BrowserAdapter` es la primera implementación. El contrato de candidato/localizador conserva terminología DOM en este PoC; extenderlo a móvil requiere versionar/generalizar ese contrato.
-- `runCase` controla el orden, presupuesto total, cancelación, resolución de variables, cierre de recursos y resultados. No decide el éxito mediante el modelo. La API acepta un callback por paso y proveedores/adaptadores inyectados.
-- `saveArtifacts` persiste JSON, HTML, JUnit y replay. Los directorios nuevos evitan confundir evidencia vieja con un fallo reciente. El replay usa el mismo adaptador y las mismas assertions.
+- `DecisionProvider.decide(state, questions, signal)` returns typed Choice answers. `JevProvider` implements the official `POST /v1/systemone` protocol, validates the schema and verifies that each selection belongs to the criteria, checks distributions, and handles timeouts/retries. The transport knows only about the TypeSafe API.
+- `DecisionEngine` classifies steps in batches of up to eight, chooses literals, and resolves elements. It uses `unsupported`/`none` options and never falls back to generation. It records the redacted request and response, making it possible to audit alternatives and calibrate the policy against your own cases.
+- `PlatformAdapter` opens the platform, observes candidates, executes actions, and produces evidence. `BrowserAdapter` is the first implementation. The candidate/locator contract retains DOM terminology in this proof of concept; extending it to mobile would require versioning or generalizing that contract.
+- `runCase` controls ordering, the overall budget, cancellation, variable resolution, resource cleanup, and results. It does not use the model to determine success. The API accepts a per-step callback and injected providers/adapters.
+- `saveArtifacts` persists JSON, HTML, JUnit, and replay. New directories prevent old evidence from being mistaken for a recent failure. Replay uses the same adapter and assertions.
 
-## Decisiones cerradas
+## Fixed decisions
 
-1. Validación de caso. Cada paso tiene hasta 2000 caracteres, hay hasta 100 pasos. URLs iniciales sólo HTTP(S).
-2. Jev elige una operación del catálogo. Una instrucción compuesta debe resultar `unsupported`; esta detección sigue siendo probabilística, por lo que se exige autoría atómica y revisión de evidencia.
-3. Para operaciones con argumento, código extrae comillas, referencias o spans contiguos; Jev elige un candidato o `none`. No se inventan valores. Para datos generados, se pueden preparar variables determinísticamente antes de llamar al harness.
-4. Antes de operar, Playwright obtiene un snapshot de controles/textos. El motor filtra por compatibilidad (un fill no puede apuntar a un botón) y ofrece hasta 240 candidatos. Superar el límite bloquea explícitamente; no se trunca silenciosamente el conjunto elegible.
-5. Jev elige un objetivo. La política requiere probabilidad, margen sobre la segunda opción y confianza suficientes. Probabilidad y confianza no son garantías de exactitud; sus umbrales deben calibrarse con el corpus del usuario.
-6. Playwright ejecuta una operación cerrada usando localizador estricto. Se prefieren test id, label o role/name únicos; si no, CSS observado. No se aceptan selectores generados por Jev, ni evals, ni acciones inventadas.
-7. Las assertions se implementan con `expect`/poll de Playwright. Sólo la ejecución satisfactoria de todas las acciones y assertions produce `passed`.
+1. Case validation. Each step is limited to 2,000 characters, and a case can have up to 100 steps. Initial URLs must use HTTP(S).
+2. Jev selects an operation from the catalog. A compound instruction should be classified as `unsupported`; this detection remains probabilistic, so authors must write atomic steps and review the evidence.
+3. For operations with arguments, code extracts quotes, references, or contiguous spans; Jev chooses a candidate or `none`. Values are never invented. Data that must be generated can be prepared deterministically before calling the harness.
+4. Before acting, Playwright obtains a snapshot of controls/text. The engine filters by compatibility (a fill cannot target a button) and offers up to 240 candidates. Exceeding the limit blocks explicitly; the eligible set is never silently truncated.
+5. Jev chooses a target. The policy requires sufficient probability, margin over the second choice, and confidence. Probability and confidence do not guarantee correctness; thresholds should be calibrated against the user's corpus.
+6. Playwright executes a closed operation with a strict locator. It prefers a unique test id, label, or role/name; otherwise it uses observed CSS. Jev-generated selectors, evals, and invented actions are not accepted.
+7. Assertions use Playwright `expect`/polling. Only successful execution of all actions and assertions produces `passed`.
 
-Las assertions de página (texto y URL) no necesitan una selección de elemento. Las assertions de control sí usan Jev para interpretar a qué control se refiere el paso, y Playwright para medir su estado. Esto elimina un juez LLM del resultado pero no elimina errores de interpretación: siempre es necesario revisar que el caso resuelto representa la intención.
+Page assertions (text and URL) do not need an element selection. Control assertions use Jev to interpret which control the step refers to, and Playwright to measure its state. This removes an LLM judge from the result but does not eliminate interpretation errors: always review that the resolved case represents the intended behavior.
 
-## Navegación, selectores y asincronía
+## Navigation, selectors, and async behavior
 
-Cada run abre un contexto aislado. El inicio es `baseUrl`; las rutas explícitas de navegación/URL se resuelven respecto de esa URL. El adaptador impide navegación de documentos hacia otros orígenes salvo allowlist, incluidos iframes. Puede cargarse `storageState` para sesiones preparadas externamente. Los popups se detectan como no soportados.
+Each run opens an isolated context. The starting point is `baseUrl`; explicit navigation/URL paths resolve relative to it. The adapter blocks document navigation to other origins unless allowlisted, including in iframes. `storageState` can be loaded for sessions prepared externally. Popups are detected as unsupported.
 
-Los localizadores se resuelven de nuevo al actuar. Playwright exige unicidad y actionability; un snapshot no garantiza que un DOM que cambió entre decisión y acción mantenga la misma identidad. Los localizadores CSS estructurales y los índices de frame tienen limitaciones explícitas. Para aplicaciones críticas, preferí test ids estables y validación de identidad específica en un adaptador propio.
+Locators are resolved again when an action runs. Playwright requires uniqueness and actionability; a snapshot does not guarantee that a DOM changed between decision and action will retain the same identity. Structural CSS locators and frame indexes have explicit limitations. For critical applications, prefer stable test ids and validate identity in a purpose-built adapter.
 
-No se reintentan acciones con efectos. Las assertions usan autoespera. La resolución de objetivos actualmente toma un snapshot por paso: no hay búsqueda autónoma, scroll exploratorio o recuperación de rutas. Las listas enormes, controles no expuestos en el DOM y pasos abiertos se bloquean.
+Actions with side effects are not retried. Assertions use auto-waiting. Target resolution currently takes one snapshot per step: there is no autonomous search, exploratory scrolling, or route recovery. Very large lists, controls not exposed in the DOM, and open-ended steps are blocked.
 
-## Variables y reproducibilidad
+## Variables and reproducibility
 
-`${NAME}` se conserva como referencia durante las decisiones; `env:NAME` carga un valor en el runner. Los valores de variables se sustituyen sólo al ejecutar el argumento. El CLI también los usa para enmascarar screenshots. La API de biblioteca permite suministrar `maskValues` al adaptador cuando se requiere el mismo enmascaramiento. Los campos de formulario siempre se enmascaran.
+`${NAME}` is preserved as a reference during decisions; `env:NAME` loads a value in the runner. Variable values are substituted only when the argument is executed. The CLI also uses them to mask screenshots. The library API lets callers supply `maskValues` to the adapter for the same masking. Form fields are always masked.
 
-Los planes de replay se validan con Zod y no contienen código. Se exportan solamente de runs exitosos, conservan versiones de formato y no requieren proveedor. Los valores inline de variables se sustituyen por referencias de entorno en el plan. Si un localizador contiene literalmente un secreto que se redacta, el replay puede fallar: no se reconstruyen localizadores secretos. Las fixtures deben dar identidades estables a los controles.
+Replay plans are validated with Zod and contain no code. They are exported only from successful runs, preserve format versions, and do not require a provider. Inline variable values are replaced by environment references in the plan. If a locator literally contains a redacted secret, replay may fail: secret locators are not reconstructed. Fixtures should give controls stable identities.
 
-El modelo se fija por defecto a `jev-1.14.0`. Cambiar modelo o política requiere volver a ejecutar el corpus de evaluación, no asumir equivalencia. No se ofrece una garantía estadística a partir de los escenarios de demostración.
+The model defaults to the pinned `jev-1.14.0`. Changing the model or policy requires rerunning the evaluation corpus; equivalence should not be assumed. The demo scenarios do not support a statistical reliability guarantee.
 
-## Próximas extensiones razonables
+## Reasonable future extensions
 
-- Corpus versionado con etiquetas de operación/target y métricas de exactitud, rechazo y falsos positivos por idioma/UI.
-- Proveedores de candidatos especializados para componentes del producto, identidad robusta de frames y renderizados virtuales.
-- Fixtures/setup/teardown explícitos y resolución determinista de datos generados.
-- Assertion plugins con contratos tipados y validaciones específicas de dominio.
-- Cola de ejecuciones, aislamiento por usuario y editor web sobre la API existente.
+- A versioned corpus with operation/target labels and accuracy, rejection, and false-positive metrics by language/UI.
+- Specialized candidate providers for product components, robust frame identity, and virtualized rendering.
+- Explicit fixtures/setup/teardown and deterministic generation of test data.
+- Assertion plugins with typed contracts and domain-specific validation.
+- A run queue, per-user isolation, and a web editor on top of the existing API.
 
-Estas extensiones no están implementadas ni son necesarias para ejecutar los ejemplos actuales.
+These extensions are not implemented and are not required to run the current examples.

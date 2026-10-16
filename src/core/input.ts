@@ -72,7 +72,7 @@ export function literalCandidates(text: string): string[] {
       if (spans.size > 240)
         throw new HarnessError(
           "VALUE_SPACE_TOO_LARGE",
-          'Use quotes around the exact value, e.g. Escribí "Ana" en Nombre.',
+          'Use quotes around the exact value, e.g. Type "Ana" into the Name field.',
         );
     }
   }

@@ -1,140 +1,140 @@
 # duit
 
-Harness E2E de UI: una lista de pasos en lenguaje natural se convierte en acciones de navegador y assertions ejecutables. **Jev es el único modelo en runtime**. Playwright observa y opera la UI; TypeSafe Jev selecciona operaciones, valores existentes y objetivos del DOM. No hay generación de código, chat, traducción con otro LLM ni fallback a otro proveedor.
+End-to-end UI test harness: a list of natural-language steps becomes executable browser actions and assertions. **Jev is the only model used at runtime.** Playwright observes and operates the UI; TypeSafe Jev selects operations, existing values, and DOM targets. There is no code generation, chat, translation by another LLM, or fallback provider.
 
-El PoC incluye CLI, API TypeScript, adaptador de navegador, escenarios ejecutables, reportes y replay determinista sin modelo. No incluye un editor web ni un servicio multiusuario.
+The proof of concept includes a CLI, TypeScript API, browser adapter, executable scenarios, reports, and deterministic replay without a model. It does not include a web editor or a multi-user service.
 
-## Inicio rápido
+## Quick start
 
-Requiere Node.js 22 o posterior y una clave de [TypeSafe](https://console.typesafe.ai).
+Requires Node.js 22 or later and a [TypeSafe](https://console.typesafe.ai) API key.
 
 ```bash
 npm ci
 npx playwright install --with-deps chromium
-export JEV_API_KEY='tu-clave'
+export JEV_API_KEY='your-key'
 export DEMO_PASSWORD='demo123'
 npm run demo
 ```
 
-En otra terminal, con las mismas variables:
+In another terminal, with the same environment variables:
 
 ```bash
 npm run duit -- run examples/checkout.es.yaml
 ```
 
-La tienda de prueba escucha en `http://127.0.0.1:4173`. El caso hace login, agrega un producto, completa una dirección, elige envío, verifica un botón deshabilitado, acepta términos y comprueba una confirmación asíncrona. Los artefactos se escriben en una carpeta nueva dentro de `artifacts/`.
+The sample shop listens at `http://127.0.0.1:4173`. This scenario signs in, adds a product, enters an address, chooses shipping, checks a disabled button, accepts the terms, and verifies an asynchronous confirmation. Artifacts are written to a new directory under `artifacts/`.
 
-Una lista simple también funciona:
+A plain list of steps works too:
 
 ```bash
 npm run duit -- run examples/login.en.txt --base-url http://127.0.0.1:4173
 ```
 
-Para una UI externa de demostración:
+For an external demo UI:
 
 ```bash
-export SAUCE_PASSWORD='secret_sauce' # Credencial pública de SauceDemo
+export SAUCE_PASSWORD='secret_sauce' # Public SauceDemo credential
 npm run duit -- run examples/saucedemo.en.yaml --timeout 15000
-# En un entorno que requiere proxy para Chromium:
+# If Chromium needs a proxy in your environment:
 npm run duit -- run examples/saucedemo.en.yaml --proxy "$HTTPS_PROXY" --timeout 15000
 ```
 
-`npm run duit -- --help` muestra todas las opciones. `npm run build` compila la biblioteca y permite usar `node dist/cli.js` sin tsx.
+`npm run duit -- --help` lists all options. `npm run build` compiles the library so you can use `node dist/cli.js` without tsx.
 
-## Escribir casos propios
+## Writing your own cases
 
 ```yaml
-name: Guardar perfil
-baseUrl: https://mi-entorno-de-test.example
+name: Save profile
+baseUrl: https://my-test-environment.example
 variables:
   NAME: Ana García
   PASSWORD: env:TEST_PASSWORD
 steps:
-  - 'Escribí "${NAME}" en el campo Nombre'
-  - "Hacé clic en Guardar"
-  - 'Verificá que aparezca el texto "Perfil guardado"'
+  - 'Type "${NAME}" into the Name field'
+  - "Click Save"
+  - 'Verify that the text "Profile saved" appears'
 ```
 
-También se aceptan JSON y archivos `.txt`/`.md` con un paso por línea. En texto se omiten encabezados `#` y se quita la numeración o viñeta inicial. No es un parser general de documentos Markdown.
+JSON and `.txt`/`.md` files with one step per line are also accepted. Text files skip `#` headings and strip leading numbering or bullets. This is not a general Markdown parser.
 
-- Escribí **una acción o una verificación por línea**. Separá “ingresar y comprar” en pasos observables.
-- Los valores entre comillas son exactos. Para texto sin comillas, se ofrecen a Jev fragmentos de hasta ocho palabras del propio paso. Jev elige un fragmento; no puede inventar, traducir ni calcular valores. Preferí comillas para evitar ambigüedad.
-- Usá el nombre visible del control. Las instrucciones pueden estar en español o inglés; traducir libremente nombres de controles entre idiomas no es confiable en todos los casos.
-- Distinguí acciones y assertions: “marcar Acepto” modifica el checkbox; “verificar que Acepto esté marcado” sólo observa.
-- Incluí al menos una assertion explícita. Un flujo sin verificaciones queda `blocked`.
-- Para verificar texto ausente, pedí “Verificá que no se vea el texto \"Error\"”. `assert_hidden` requiere un elemento que se pueda identificar en el DOM, aunque esté oculto.
-- En YAML, entrecomillá la línea completa si contiene `: `; de lo contrario YAML puede interpretarla como un objeto.
+- Write **one action or assertion per line**. Split “enter details and buy” into observable steps.
+- Quoted values are exact. For unquoted text, Jev is offered fragments of up to eight words from the step itself. Jev chooses a fragment; it cannot invent, translate, or calculate values. Prefer quotes to avoid ambiguity.
+- Use the visible control name. Instructions may be in English or Spanish; freely translating control names across languages is not reliable in every case.
+- Distinguish actions from assertions: “check I agree” changes the checkbox; “verify I agree is checked” only observes it.
+- Include at least one explicit assertion. A flow with no checks is `blocked`.
+- To verify that text is absent, ask to “Verify that the text \"Error\" is not visible.” `assert_hidden` requires an element that can be identified in the DOM, even if it is hidden.
+- In YAML, quote the entire line if it contains `: `; otherwise YAML may parse it as an object.
 
-Operaciones disponibles:
+Available operations:
 
-| Acción                                                | Verificación                                         |
-| ----------------------------------------------------- | ---------------------------------------------------- |
-| Click, escribir/reemplazar, seleccionar opción nativa | Texto exacto visible / ausente                       |
-| Marcar/desmarcar checkbox, seleccionar radio          | Elemento visible / oculto                            |
-| Presionar tecla explícita, navegar a URL/ruta         | Valor exacto, checked/unchecked, enabled/disabled    |
-|                                                       | URL exacta (las rutas se resuelven contra `baseUrl`) |
+| Action                                           | Assertion                                        |
+| ------------------------------------------------ | ------------------------------------------------ |
+| Click, fill/replace text, select a native option | Exact visible / absent text                      |
+| Check/uncheck a checkbox, select a radio button  | Element visible / hidden                         |
+| Press an explicit key, navigate to a URL/path    | Exact value, checked/unchecked, enabled/disabled |
+|                                                  | Exact URL (paths resolve against `baseUrl`)      |
 
-Las assertions de texto usan coincidencia exacta con la normalización de espacios de Playwright y aceptan cualquier coincidencia visible. No evalúan semántica libre: “la página se ve bien” se rechaza. Las assertions esperan hasta `--timeout` para tolerar actualizaciones asíncronas; las negativas comprueban el estado observado, no que algo permanezca ausente durante un intervalo.
+Text assertions use exact matching with Playwright whitespace normalization and accept any visible match. They do not evaluate free-form semantics: “the page looks good” is rejected. Assertions wait up to `--timeout` for asynchronous updates; negative assertions check the observed state, not that something remains absent for a period of time.
 
-## Resultados y replay
+## Results and replay
 
-Cada ejecución crea una carpeta **que no debe existir previamente** con:
+Each run creates a directory that **must not already exist**, containing:
 
-- `report.html`: resumen y screenshots por paso.
-- `report.json`: pasos, acciones, duración, errores, peticiones y respuestas tipadas de Jev, probabilidades, versión del modelo y tokens.
-- `junit.xml`: integración CI; `blocked` también produce un fallo, nunca éxito.
-- `step-*.png`: screenshots con inputs, textareas y valores de variables enmascarados.
-- `replay.json`: sólo si el caso completo pasó; conserva acciones, assertions y localizadores resueltos.
-- `trace.zip`: sólo con `--trace`, para Playwright Trace Viewer.
+- `report.html`: summary and screenshots for each step.
+- `report.json`: steps, actions, duration, errors, requests and typed Jev responses, probabilities, model version, and tokens.
+- `junit.xml`: CI integration; `blocked` also produces a failure, never a success.
+- `step-*.png`: screenshots with inputs, textareas, and variable values masked.
+- `replay.json`: only when the entire case passes; stores actions, assertions, and resolved locators.
+- `trace.zip`: only with `--trace`, for Playwright Trace Viewer.
 
 ```bash
-# Reutiliza la carpeta indicada por la ejecución anterior:
+# Reuse the directory from a previous run:
 export EMAIL='ana@example.com'
 export DEMO_PASSWORD='demo123'
-npm run duit -- replay artifacts/<ejecucion>/replay.json
-npx playwright show-trace artifacts/<ejecucion>/trace.zip
+npm run duit -- replay artifacts/<run>/replay.json
+npx playwright show-trace artifacts/<run>/trace.zip
 ```
 
-El replay no requiere `JEV_API_KEY` y no llama a ningún modelo. Las variables inline se exportan como `env:NOMBRE` para no persistir sus valores en el plan; las referencias `env:OTRO_NOMBRE` se conservan. Es un test reproducible con los localizadores observados, no un mecanismo de reparación automática. Si cambia el DOM, debe fallar y revisarse o volverse a resolver en modo live. Los planes no sustituyen una fixture que prepare/restaure el backend.
+Replay does not require `JEV_API_KEY` and does not call a model. Inline variables are exported as `env:NAME` references so their values are not persisted in the plan; existing `env:OTHER_NAME` references are retained. Replay is a reproducible test using observed locators, not an automatic repair mechanism. If the DOM changes, it should fail and be reviewed or resolved again in live mode. Plans do not replace a fixture that prepares or restores the backend.
 
-Códigos de salida: `0` passed, `1` acción/assertion fallida, `2` blocked/error de configuración. Una falta de confianza no se presenta como un bug confirmado de la aplicación.
+Exit codes: `0` passed, `1` action/assertion failed, `2` blocked/configuration error. Low confidence is not reported as a confirmed application bug.
 
-## Configuración
+## Configuration
 
-| Configuración                    | Predeterminado                                          |
-| -------------------------------- | ------------------------------------------------------- |
-| `JEV_API_KEY`                    | Obligatoria sólo en live                                |
-| `JEV_MODEL`                      | `jev-1.14.0`, versión fija                              |
-| `JEV_ENDPOINT`                   | `https://api.typesafe.ai/v1/systemone`                  |
-| `DUIT_BROWSER_PROXY` / `--proxy` | Conexión directa de navegador                           |
-| `--browser`                      | `chromium`; también `firefox`, `webkit` si se instalan  |
-| `--timeout`                      | 5000 ms por acción/assertion                            |
-| `--budget`                       | 300000 ms por ejecución                                 |
-| `--min-probability`              | 0.70                                                    |
-| Política en API                  | Margen mínimo 0.20 y confianza mínima 0.40              |
-| `--allow-origin`                 | Sólo el origen de `baseUrl`; repetible para SSO/iframes |
-| `--storage-state`                | Contexto nuevo; opcional estado autenticado Playwright  |
-| `--no-screenshots`               | Desactiva capturas                                      |
+| Setting                          | Default                                                         |
+| -------------------------------- | --------------------------------------------------------------- |
+| `JEV_API_KEY`                    | Required only in live mode                                      |
+| `JEV_MODEL`                      | `jev-1.14.0`, pinned version                                    |
+| `JEV_ENDPOINT`                   | `https://api.typesafe.ai/v1/systemone`                          |
+| `DUIT_BROWSER_PROXY` / `--proxy` | Direct browser connection                                       |
+| `--browser`                      | `chromium`; also `firefox`, `webkit` if installed               |
+| `--timeout`                      | 5000 ms per action/assertion                                    |
+| `--budget`                       | 300000 ms per run                                               |
+| `--min-probability`              | 0.70                                                            |
+| API policy                       | Minimum margin 0.20 and minimum confidence 0.40                 |
+| `--allow-origin`                 | Only the `baseUrl` origin; repeat for SSO/iframes               |
+| `--storage-state`                | New context by default; optional authenticated Playwright state |
+| `--no-screenshots`               | Disable screenshots                                             |
 
-La API de Jev respeta `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` y la confianza CA de Node. El proxy de navegador se configura por separado. No se desactiva TLS. Se reintentan únicamente errores de transporte/HTTP transitorios, con presupuesto y backoff; nunca clicks ni envíos de formularios.
+The Jev API respects `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and Node's CA trust. Configure the browser proxy separately. TLS is not disabled. Only transient transport/HTTP errors are retried, within a budget and with backoff; clicks and form submissions are never retried.
 
-## Arquitectura y extensión
+## Architecture and extension
 
 ```mermaid
 flowchart LR
-  A[Lista de pasos] --> B[Validación y candidatos literales]
-  B --> C[Jev: operación y valor]
-  C --> D[Observación DOM]
-  D --> E[Jev: elegir elemento]
-  E --> F[Política de confianza]
-  F --> G[Adaptador Playwright]
-  G --> H[Assertion determinista]
-  H --> I[Reportes y replay]
+  A[Step list] --> B[Validation and literal candidates]
+  B --> C[Jev: operation and value]
+  C --> D[DOM observation]
+  D --> E[Jev: choose element]
+  E --> F[Confidence policy]
+  F --> G[Playwright adapter]
+  G --> H[Deterministic assertion]
+  H --> I[Reports and replay]
 ```
 
-`src/core` no depende de Playwright ni de la API HTTP de TypeSafe. `DecisionProvider` define las decisiones y `PlatformAdapter` define observación, ejecución y evidencia. El catálogo de operaciones es explícito y tipado. Se puede implementar otro adaptador para una plataforma distinta y reutilizar runner/reportes; la generación de candidatos y el vocabulario de acciones de esa plataforma requieren desarrollo, no basta con cambiar una configuración. Los detalles están en [docs/architecture.md](docs/architecture.md).
+`src/core` does not depend on Playwright or the TypeSafe HTTP API. `DecisionProvider` defines decisions and `PlatformAdapter` defines observation, execution, and evidence. The operation catalog is explicit and typed. Another adapter can be implemented for a different platform while reusing the runner and reports; generating candidates and defining that platform's action vocabulary require implementation work, not just a configuration change. See [docs/architecture.md](docs/architecture.md) for details.
 
-Ejemplo de integración después de compilar:
+Example integration after building:
 
 ```ts
 import {
@@ -161,21 +161,21 @@ try {
 }
 ```
 
-## Verificación
+## Verification
 
 ```bash
-npm run check      # Tipos de biblioteca, CLI, ejemplos y tests
+npm run check      # Library, CLI, examples, and test types
 npm run build
-npm test           # Tests locales + Chromium real; sin API de modelos
-npm run test:live  # API real, requiere JEV_API_KEY y consume tokens
+npm test           # Local tests + real Chromium; no model API
+npm run test:live  # Real API, requires JEV_API_KEY and consumes tokens
 ```
 
-La suite live inicia/cierra su propia tienda local; no requiere `npm run demo`. Verifica casos positivos y una assertion falsa. No usa mocks como fallback. CI ejecuta los tests offline; el live se activa manualmente con un secret del repositorio. Resultados medidos y límites: [docs/feasibility.md](docs/feasibility.md).
+The live suite starts and stops its own local shop; `npm run demo` is not required. It checks positive cases and one false assertion. It uses no mock fallback. CI runs offline tests; live tests are started manually with a repository secret. Measured results and limitations: [docs/feasibility.md](docs/feasibility.md).
 
-## Alcance y datos
+## Scope and data
 
-Este PoC funciona para flujos DOM convencionales con pasos atómicos y datos explícitos. Incluye iframes presentes con orden estable y shadow DOM abierto. No cubre canvas, shadow DOM cerrado, carga de archivos, drag-and-drop, captchas, autenticación interactiva MFA, popups/múltiples pestañas, extracción de valores desconocidos para pasos futuros ni objetivos abiertos que requieran planificación. La observación inicial no implementa un ciclo autónomo de búsqueda/reparación; un control que aún no existe puede producir `blocked`. El adaptador usa aproximaciones al nombre accesible y debe evaluarse en cada UI.
+This proof of concept supports conventional DOM flows with atomic steps and explicit data. It includes present iframes with stable order and open shadow DOM. It does not cover canvas, closed shadow DOM, file uploads, drag-and-drop, captchas, interactive MFA, popups/multiple tabs, extracting unknown values for later steps, or open-ended goals that require planning. Initial observation does not implement an autonomous search/repair loop; a control that does not yet exist can result in `blocked`. The adapter approximates accessible names and should be evaluated against each UI.
 
-El modelo recibe pasos y descripciones de candidatos DOM. No recibe screenshots ni valores de inputs del extractor. Las variables se resuelven localmente y sus valores se redactan en peticiones y reportes; usá `${VARIABLE}` para datos sensibles. Los valores escritos literalmente en pasos y otros contenidos de la página pueden persistirse/enviarse. Las trazas opt-in **no se redactan** y pueden contener DOM, red y secretos. Los screenshots enmascarados no son una garantía general de eliminación de PII. Guardá los artefactos según la política de datos de tu proyecto.
+The model receives steps and descriptions of DOM candidates. It does not receive screenshots or input values from the extractor. Variables are resolved locally and their values are redacted from requests and reports; use `${VARIABLE}` for sensitive data. Values written literally in steps and other page content may be persisted or sent. Opt-in traces are **not redacted** and may contain DOM, network data, and secrets. Masked screenshots are not a general guarantee that PII has been removed. Store artifacts according to your project's data policy.
 
-Sólo se permite navegación a los orígenes configurados; esto limita errores de navegación, no convierte el navegador en un sandbox de red. Subrecursos/fetches de la UI conservan su comportamiento normal. El contenido de páginas se trata como datos para las decisiones; el diseño cerrado reduce las acciones posibles pero no garantiza inmunidad a prompt injection. No hay generación ni ejecución de JavaScript proveniente del usuario o del modelo.
+Only navigation to configured origins is allowed; this limits navigation errors but does not make the browser a network sandbox. UI subresources and fetch requests behave normally. Page content is treated as data for decisions; the closed design reduces the possible actions but does not guarantee immunity to prompt injection. No JavaScript from the user or model is generated or executed.
