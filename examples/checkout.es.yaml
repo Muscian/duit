@@ -1,0 +1,20 @@
+name: Compra con envío Express
+baseUrl: http://127.0.0.1:4173
+variables:
+  EMAIL: ana@example.com
+  PASSWORD: env:DEMO_PASSWORD
+steps:
+  - 'Escribí "${EMAIL}" en el campo Correo electrónico'
+  - 'Escribí "${PASSWORD}" en el campo Contraseña'
+  - "Hacé clic en Iniciar sesión"
+  - 'Verificá que aparezca el texto "Bienvenida, Ana"'
+  - "Agregá el Cuaderno al carrito haciendo clic en Agregar Cuaderno"
+  - 'Verificá que aparezca el texto "Carrito: Cuaderno"'
+  - 'Escribí "Av. Corrientes 1234" en Dirección'
+  - 'Seleccioná "Express" en Método de envío'
+  - "Verificá que el botón Confirmar pedido esté deshabilitado"
+  - "Marcá la casilla Acepto los términos"
+  - "Verificá que la casilla Acepto los términos esté marcada"
+  - "Hacé clic en Confirmar pedido"
+  - 'Verificá que aparezca el texto "Pedido confirmado"'
+  - 'Verificá que aparezca el texto "Carrito vacío"'

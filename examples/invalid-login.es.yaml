@@ -1,0 +1,7 @@
+name: Rechazar credenciales incorrectas
+baseUrl: http://127.0.0.1:4173
+steps:
+  - Escribí "ana@example.com" en Correo electrónico
+  - Escribí "incorrecta" en Contraseña
+  - Hacé clic en Iniciar sesión
+  - Verificá que se vea el texto "Credenciales incorrectas"

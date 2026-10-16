@@ -1,0 +1,41 @@
+{
+  "name": "duit-harness",
+  "version": "0.1.0",
+  "description": "Natural-language UI tests with Jev decisions and deterministic Playwright assertions",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "duit": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.tests.json",
+    "test": "tsx --test tests/*.test.ts",
+    "test:live": "DUIT_LIVE=1 tsx --test tests/live.test.ts",
+    "duit": "tsx src/cli.ts",
+    "demo": "tsx examples/shop/server.ts",
+    "format": "prettier --write src tests examples docs README.md *.json .github/workflows/*.yml",
+    "format:check": "prettier --check src tests examples docs README.md *.json .github/workflows/*.yml"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.56.0",
+    "undici": "^7.16.0",
+    "yaml": "^2.8.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.0",
+    "prettier": "^3.9.10",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

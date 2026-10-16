@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="es">
+  <meta charset="utf-8" /><title>Duit Store — Test fixture</title
+  ><style>
+    body {
+      font: 16px system-ui;
+      max-width: 850px;
+      margin: 40px auto;
+      background: #f3f5f8;
+      color: #142033;
+    }
+    section,
+    form {
+      background: white;
+      padding: 24px;
+      margin: 20px 0;
+      border: 1px solid #dbe0e9;
+      border-radius: 12px;
+    }
+    label {
+      display: block;
+      margin: 12px 0;
+    }
+    input,
+    select,
+    button {
+      font: inherit;
+      padding: 10px;
+      border: 1px solid #bcc9da;
+      border-radius: 6px;
+    }
+    button {
+      cursor: pointer;
+      background: #173e84;
+      color: white;
+    }
+    button:disabled {
+      opacity: 0.4;
+    }
+    article {
+      display: inline-block;
+      width: 42%;
+      padding: 20px;
+    }
+    #message {
+      font-weight: bold;
+    }
+  </style>
+  <h1>Duit Store</h1>
+  <p>
+    Un comercio de prueba con formularios, carrito y confirmaciones asíncronas.
+  </p>
+  <form id="login">
+    <h2>Ingresar</h2>
+    <label
+      >Correo electrónico
+      <input
+        type="email"
+        name="email"
+        required
+        autocomplete="username" /></label
+    ><label
+      >Contraseña
+      <input
+        type="password"
+        name="password"
+        required
+        autocomplete="current-password" /></label
+    ><button>Iniciar sesión</button>
+    <p role="alert" id="login-error" hidden>Credenciales incorrectas</p>
+  </form>
+  <section id="store" hidden>
+    <h2>Catálogo</h2>
+    <p id="welcome"></p>
+    <article>
+      <h3>Cuaderno</h3>
+      <p>$12</p>
+      <button data-testid="add-notebook">Agregar Cuaderno</button>
+    </article>
+    <article>
+      <h3>Lápiz</h3>
+      <p>$3</p>
+      <button data-testid="add-pencil">Agregar Lápiz</button>
+    </article>
+    <p id="cart">Carrito vacío</p>
+    <button id="empty">Vaciar carrito</button>
+    <form id="checkout">
+      <h2>Entrega</h2>
+      <label>Dirección <input name="address" required /></label
+      ><label for="shipping">Método de envío</label
+      ><select id="shipping" name="shipping">
+        <option>Estándar</option>
+        <option>Express</option></select
+      ><label><input type="checkbox" name="terms" /> Acepto los términos</label
+      ><button id="confirm" disabled>Confirmar pedido</button>
+    </form>
+    <p id="message" role="status"></p>
+  </section>
+  <script>
+    const $ = (s) => document.querySelector(s);
+    let items = [];
+    $("#login").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      if (
+        f.get("email") === "ana@example.com" &&
+        f.get("password") === "demo123"
+      ) {
+        $("#login").hidden = true;
+        $("#store").hidden = false;
+        $("#welcome").textContent = "Bienvenida, Ana";
+      } else {
+        $("#login-error").hidden = false;
+      }
+    });
+    function cart() {
+      $("#cart").textContent = items.length
+        ? `Carrito: ${items.join(", ")}`
+        : "Carrito vacío";
+    }
+    $('[data-testid="add-notebook"]').onclick = () => {
+      items.push("Cuaderno");
+      cart();
+    };
+    $('[data-testid="add-pencil"]').onclick = () => {
+      items.push("Lápiz");
+      cart();
+    };
+    $("#empty").onclick = () => {
+      items = [];
+      cart();
+    };
+    $('[name="terms"]').onchange = (e) => {
+      $("#confirm").disabled = !e.target.checked;
+    };
+    $("#checkout").onsubmit = (e) => {
+      e.preventDefault();
+      if (!items.length) {
+        $("#message").textContent = "El carrito está vacío";
+        return;
+      }
+      $("#confirm").disabled = true;
+      $("#message").textContent = "Procesando…";
+      setTimeout(() => {
+        $("#message").textContent = "Pedido confirmado";
+        items = [];
+        cart();
+        $("#confirm").disabled = false;
+      }, 350);
+    };
+  </script>
+</html>

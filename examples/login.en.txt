@@ -1,0 +1,4 @@
+1. Enter "ana@example.com" in the email field
+2. Enter "demo123" in the password field
+3. Click the "Iniciar sesión" button
+4. Verify the text "Bienvenida, Ana" is visible

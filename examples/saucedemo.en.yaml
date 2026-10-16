@@ -1,0 +1,21 @@
+name: Public demo - backpack checkout
+baseUrl: https://www.saucedemo.com
+variables:
+  USERNAME: standard_user
+  PASSWORD: env:SAUCE_PASSWORD
+steps:
+  - 'Enter "${USERNAME}" in Username'
+  - 'Enter "${PASSWORD}" in Password'
+  - "Click Login"
+  - 'Verify the text "Products" is visible'
+  - "Click Add to cart for Sauce Labs Backpack"
+  - 'Navigate to "/cart.html"'
+  - 'Verify the text "Sauce Labs Backpack" is visible'
+  - "Click Checkout"
+  - 'Enter "Ana" in First Name'
+  - 'Enter "García" in Last Name'
+  - 'Enter "1043" in Zip/Postal Code'
+  - "Click Continue"
+  - 'Verify the text "Checkout: Overview" is visible'
+  - "Click Finish"
+  - 'Verify the text "Thank you for your order!" is visible'
