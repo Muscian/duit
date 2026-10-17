@@ -1,6 +1,6 @@
 {
   "name": "duit-harness",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Natural-language UI tests with Jev decisions and deterministic Playwright assertions",
   "type": "module",
   "private": true,
@@ -23,11 +23,14 @@
     "test:live": "DUIT_LIVE=1 tsx --test tests/live.test.ts",
     "duit": "tsx src/cli.ts",
     "demo": "tsx examples/shop/server.ts",
-    "format": "prettier --write src tests examples docs README.md *.json .github/workflows/*.yml",
-    "format:check": "prettier --check src tests examples docs README.md *.json .github/workflows/*.yml",
-    "test:mulesoft": "DUIT_MULESOFT_LIVE=1 tsx --test tests/mulesoft.test.ts"
+    "format": "prettier --write src tests examples docs skills README.md *.json .github/workflows/*.yml",
+    "format:check": "prettier --check src tests examples docs skills README.md *.json .github/workflows/*.yml",
+    "test:mulesoft": "DUIT_MULESOFT_LIVE=1 tsx --test tests/mulesoft.test.ts",
+    "test:public": "DUIT_PUBLIC_LIVE=1 tsx --test tests/public.test.ts",
+    "demo:canvas": "tsx examples/canvas/server.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@playwright/test": "^1.56.0",
     "proxy-from-env": "^2.1.0",
     "undici": "^7.16.0",

@@ -1,0 +1,7 @@
+name: Real Jev visual fallback on a canvas without DOM controls
+baseUrl: http://127.0.0.1:4180
+visual: { enabled: true, maxCalls: 1 }
+costs: { maxRequests: 8, maxUsd: 0.01 }
+steps:
+  - Click Continue
+  - Verify the text "Canvas confirmed" is visible

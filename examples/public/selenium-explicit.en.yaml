@@ -1,0 +1,17 @@
+name: Selenium form - zero-model explicit contract
+baseUrl: https://www.selenium.dev/selenium/web/web-form.html
+steps:
+  - instruction: Fill Text input
+    operation: fill
+    control: { name: Text input }
+    value: DUIT explicit demo
+  - instruction: Fill Textarea
+    operation: fill
+    control: { name: Textarea }
+    value: Authored once by the user's LLM; reused without runtime generation.
+  - instruction: Submit form
+    operation: click
+    control: { name: Submit, role: button }
+  - instruction: Verify submission
+    operation: assert_text
+    value: Received!

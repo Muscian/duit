@@ -1,8 +1,8 @@
 # duit
 
-End-to-end UI test harness: a list of natural-language steps becomes executable browser actions and assertions. **Jev is the only model used at runtime.** Playwright observes and operates the UI; TypeSafe Jev selects operations, existing values, and semantic DOM targets. Explicit UI labels that uniquely match an observed control are bound deterministically. There is no code generation, chat, translation by another LLM, or fallback provider.
+End-to-end UI test harness: a list of natural-language steps becomes executable browser actions and assertions. **Jev is the default decision model.** Playwright observes and operates the UI; TypeSafe Jev selects operations, existing values, and semantic DOM targets. Explicit UI labels that uniquely match an observed control are bound deterministically. There is no code generation or fallback action planner. An optional, separately budgeted writer can generate text for explicit fill steps; it does not select actions or judge assertions.
 
-The proof of concept includes a CLI, TypeScript API, browser adapter, executable scenarios, reports, and deterministic replay without a model. It does not include a web editor or a multi-user service.
+The proof of concept includes a CLI, TypeScript API, browser adapter, executable scenarios, reports, and deterministic replay without a model. It includes a local HTTP API, an MCP server and authoring/recovery skills. It does not include a web editor or a multi-user service.
 
 ## Quick start
 
@@ -67,6 +67,21 @@ This permission is scoped to that origin in each fresh context. Add `--channel c
 Use `npm run duit -- explore case.yaml` to retain the browser after a blocked step. Inspect the current UI with `:inspect`, correct a pre-dispatch failure with `:retry`, and resume the plan with `:continue`. An uncertain dispatched action must be verified with `:confirm`, never blindly repeated.
 
 Cases can declare expected `interruptions`, page `context`, control `scope`, explicit name `aliases`, and UI `cleanup`. See [runtime authoring](docs/runtime-authoring.md) for the commands and recovery guarantees, and [Omni Header Injection](docs/omni-header-injection.md) for the real UI-only flow and its validation result.
+
+## Faster adoption and model costs
+
+- [API, MCP and skills](docs/integrations.md): use DUIT from your model or application, inspect unfamiliar UIs and resume retained sessions.
+- [Visual fallback, optional writer and budgets](docs/visual-writing-costs.md): Jev screenshot/box clicks, authored or generated field values, per-run token/USD estimates and limits.
+- [Public-site validation](docs/public-validation.md): forms, delayed controls, frames, popups, changing labels and real visual targeting.
+
+```bash
+npm run duit -- validate examples/public/selenium-form.en.yaml
+npm run duit -- run examples/public/selenium-form.en.yaml --max-cost-usd 0.01
+npm run duit -- run examples/public/selenium-explicit.en.yaml  # No model/key needed
+npm run build
+node dist/cli.js mcp    # stdio protocol; register this command in your MCP client
+node dist/cli.js serve  # authenticated localhost API
+```
 
 ## Writing your own cases
 

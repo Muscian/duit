@@ -1,0 +1,5 @@
+name: Public new-window navigation
+baseUrl: https://the-internet.herokuapp.com/windows
+steps:
+  - Click Click Here
+  - Verify the text "New Window" is visible

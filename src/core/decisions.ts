@@ -14,6 +14,9 @@ import {
   type Operation,
   type ResolvedAction,
   type StepInstruction,
+  type VisualOptions,
+  type VisualFrame,
+  type RunReport,
 } from "./types.js";
 
 export type DecisionPolicy = {
@@ -40,6 +43,7 @@ export function gate(
   );
   if (
     !Number.isFinite(p) ||
+    !Number.isFinite(answer.confidence) ||
     p < policy.minProbability ||
     p - runnerUp < policy.minMargin ||
     answer.confidence < policy.minConfidence
@@ -57,6 +61,8 @@ const choice = (
 ): ChoiceQuestion => ({ type: "choice", instructions, criteria });
 export class DecisionEngine {
   readonly events: DecisionEvent[] = [];
+  readonly visualEvents: NonNullable<RunReport["visualDecisions"]> = [];
+  private visualCalls = 0;
   constructor(
     private provider: DecisionProvider,
     private policy: DecisionPolicy = defaultPolicy,
@@ -96,37 +102,47 @@ export class DecisionEngine {
     for (let offset = 0; offset < steps.length; offset += 8) {
       const batch = steps.slice(offset, offset + 8);
       const questions = Object.fromEntries(
-        batch.map((step, i) => [
-          `step${i}`,
-          choice(
-            `Classify ONLY this test step: ${step}. One line must request exactly one action or assertion. Treat a request to verify as an assertion, never as an action that makes it true. For explicit quoted page text, including variable references, choose assert_text (or assert_no_text for absence). For the stored value of an input field choose assert_value. Reserve assert_visible for the visibility of a described control, not quoted page text. Choose unsupported for multiple operations or conditions.`,
-            operations,
-          ),
-        ]),
+        batch.flatMap((step, i) =>
+          typeof input[offset + i] !== "string" &&
+          (input[offset + i] as Exclude<StepInstruction, string>).operation
+            ? []
+            : [
+                [
+                  `step${i}`,
+                  choice(
+                    `Classify ONLY this test step: ${step}. One line must request exactly one action or assertion. Treat a request to verify as an assertion, never as an action that makes it true. For explicit quoted page text, including variable references, choose assert_text (or assert_no_text for absence). For the stored value of an input field choose assert_value. Reserve assert_visible for the visibility of a described control, not quoted page text. Choose unsupported for multiple operations or conditions.`,
+                    operations,
+                  ),
+                ],
+              ],
+        ),
       );
-      const answers = await this.ask(
-        "classify",
-        { steps: batch },
-        questions,
-        signal,
-      );
+      const answers = Object.keys(questions).length
+        ? await this.ask("classify", { steps: batch }, questions, signal)
+        : {};
       for (const [i, text] of batch.entries()) {
-        const op = gate(
-          answers[`step${i}`],
-          this.policy,
-          `Step ${offset + i + 1} operation`,
-        );
+        const source = input[offset + i];
+        const op =
+          (typeof source === "string" ? undefined : source.operation) ??
+          gate(
+            answers[`step${i}`],
+            this.policy,
+            `Step ${offset + i + 1} operation`,
+          );
         if (op === "unsupported")
           throw new HarnessError(
             "UNSUPPORTED_STEP",
             `Step ${offset + i + 1}: use one supported action or assertion per line`,
           );
-        const source = input[offset + i];
         const metadata =
           typeof source === "string"
             ? {}
             : {
                 context: source.context,
+                value: source.value,
+                generate: source.generate,
+                control: source.control,
+                visual: source.visual,
                 wait: source.wait,
                 scope: source.scope,
                 aliases: source.aliases,
@@ -140,6 +156,27 @@ export class DecisionEngine {
       }
     }
     for (const step of result) {
+      if (step.generate) {
+        if (step.operation !== "fill" || step.value !== undefined)
+          throw new HarnessError(
+            "INVALID_GENERATION",
+            "generate requires fill and cannot be combined with value",
+          );
+        continue;
+      }
+      if (step.visual === "only" && step.operation !== "click")
+        throw new HarnessError(
+          "INVALID_VISUAL_OPERATION",
+          "Visual targeting currently supports clicks only",
+        );
+      if (step.value !== undefined) {
+        if (!valueOperations.has(step.operation))
+          throw new HarnessError(
+            "INVALID_VALUE",
+            "This operation does not accept a value",
+          );
+        continue;
+      }
       if (!valueOperations.has(step.operation)) continue;
       const literals = literalCandidates(step.text);
       const criteria = Object.fromEntries(literals.map((v, i) => [`v${i}`, v]));
@@ -165,6 +202,82 @@ export class DecisionEngine {
       step.value = literals[Number(selected.slice(1))];
     }
     return result;
+  }
+  async resolveVisual(
+    step: CompiledStep,
+    frame: VisualFrame,
+    options: VisualOptions,
+    signal?: AbortSignal,
+  ): Promise<ResolvedAction> {
+    if (!options.enabled || !this.provider.locate)
+      throw new HarnessError(
+        "VISUAL_UNAVAILABLE",
+        "Enable visual targeting and use a provider with image/box support",
+      );
+    if (step.operation !== "click")
+      throw new HarnessError(
+        "INVALID_VISUAL_OPERATION",
+        "Only click can use a visual target; assertions remain deterministic",
+      );
+    if (++this.visualCalls > (options.maxCalls ?? 3))
+      throw new HarnessError(
+        "VISUAL_BUDGET_EXCEEDED",
+        "Visual decision limit reached",
+      );
+    const instruction = this.sanitize(
+      `${step.text}${step.scope ? ` Within ${step.scope}.` : ""}${step.control ? ` Control: ${JSON.stringify(step.control)}.` : ""}${step.aliases?.length ? ` Allowed alternative labels: ${step.aliases.join(", ")}.` : ""}`,
+    );
+    const start = performance.now();
+    const response = await this.provider.locate(frame, instruction, signal);
+    this.visualEvents.push({
+      instruction,
+      revision: frame.revision,
+      width: frame.width,
+      height: frame.height,
+      durationMs: Math.round(performance.now() - start),
+      response,
+    });
+    const chosen = gate(
+      response.answers.presence,
+      {
+        minProbability: options.minProbability ?? 0.9,
+        minConfidence: options.minConfidence ?? 0.6,
+        minMargin: 0.2,
+      },
+      "Visual target presence",
+    );
+    if (
+      chosen !== "one" ||
+      !Number.isFinite(response.answers.target.confidence) ||
+      response.answers.target.confidence < (options.minConfidence ?? 0.6)
+    )
+      throw new HarnessError(
+        "UNCERTAIN_VISUAL_TARGET",
+        "No unique confident visual target; nothing clicked",
+      );
+    const box = response.answers.target.box;
+    if (
+      Object.values(box).some((n) => !Number.isFinite(n) || n < 0 || n > 1) ||
+      box.left >= box.right ||
+      box.top >= box.bottom ||
+      (box.right - box.left) * (box.bottom - box.top) > 0.5
+    )
+      throw new HarnessError(
+        "INVALID_VISUAL_TARGET",
+        "Box is invalid or covers too much of the viewport",
+      );
+    return {
+      ...step,
+      resolution: "jev-box",
+      visualTarget: {
+        box,
+        revision: frame.revision,
+        width: frame.width,
+        height: frame.height,
+        confidence: response.answers.target.confidence,
+        presenceProbability: response.answers.presence.probabilities.one,
+      },
+    };
   }
   async resolve(
     step: CompiledStep,
@@ -192,6 +305,40 @@ export class DecisionEngine {
             .toLowerCase()
             .includes(step.scope.toLowerCase())),
     );
+    // A role-only phrase can bind a single compatible field without interpreting its value as a label.
+    const genericField =
+      (step.operation === "assert_value" &&
+        /^verify (?:the )?(?:text input|textbox|input field|textarea)(?: field)? has (?:the )?(?:exact )?value /i.test(
+          step.text,
+        )) ||
+      (step.operation === "fill" &&
+        / in (?:the )?(?:enabled )?(?:text input|textbox|input field|textarea)$/i.test(
+          step.text,
+        ));
+    if (genericField && !step.control) {
+      const fields = elements.filter((e) =>
+        /^(textbox|combobox)$/.test(e.role),
+      );
+      if (fields.length === 1)
+        return {
+          ...step,
+          target: fields[0].locator,
+          resolution: "unique-role",
+        };
+    }
+    if (step.control) {
+      const exact = elements.filter(
+        (e) =>
+          e.name === step.control!.name &&
+          (!step.control!.role || e.role === step.control!.role),
+      );
+      if (exact.length !== 1)
+        throw new HarnessError(
+          "NO_TARGET",
+          `Expected one ${step.control.role ?? "control"} named ${step.control.name}; found ${exact.length}`,
+        );
+      return { ...step, target: exact[0].locator, resolution: "exact-label" };
+    }
     // An explicit, unique observed label needs no probabilistic target decision.
     // Semantic descriptions without an exact name retain the complete eligible set.
     if (step.operation === "click") {
@@ -302,7 +449,7 @@ export function compatible(op: Operation, el: ElementCandidate): boolean {
   if (op !== "assert_hidden" && !el.visible) return false;
   if (!op.startsWith("assert_") && (el.disabled || el.blockedByModal))
     return false;
-  if (["fill", "assert_value"].includes(op))
+  if (["fill", "assert_value", "assert_nonempty"].includes(op))
     return (
       ["input", "textarea"].includes(el.tag) &&
       !["checkbox", "radio", "file", "submit", "button", "hidden"].includes(

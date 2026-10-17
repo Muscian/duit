@@ -1,0 +1,13 @@
+name: Dynamic controls - removal and delayed enabling
+baseUrl: https://the-internet.herokuapp.com/dynamic_controls
+browser:
+  timeoutMs: 15000
+steps:
+  - Click Remove
+  - Verify the text "It's gone!" is visible
+  - Click Add
+  - Verify the text "It's back!" is visible
+  - Click Enable
+  - Verify the text "It's enabled!" is visible
+  - Enter "DUIT dynamic input" in the enabled text input
+  - Verify the text input has the exact value "DUIT dynamic input"

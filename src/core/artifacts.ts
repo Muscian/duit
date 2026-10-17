@@ -25,10 +25,24 @@ export async function saveArtifacts(
   actions: ResolvedAction[],
   sanitize: (s: string) => string,
 ) {
+  if (
+    actions.some((a) => a.visualTarget) &&
+    !report.warnings.includes(
+      "Visual coordinates are snapshot-bound; no replay plan exported.",
+    )
+  )
+    report.warnings.push(
+      "Visual coordinates are snapshot-bound; no replay plan exported.",
+    );
+  const replayable = !actions.some((a) => a.visualTarget);
   const reportJson = sanitize(JSON.stringify(report, null, 2));
   await writeFile(join(report.artifactsDir, "report.json"), reportJson);
   // Values stay as variable references. Inline fixture variables are intentionally excluded from replay artifacts.
-  if (report.status === "passed" && report.mode !== "interactive") {
+  if (
+    report.status === "passed" &&
+    report.mode !== "interactive" &&
+    replayable
+  ) {
     const plan: ReplayPlan = {
       version: 1,
       name: spec.name,
@@ -61,7 +75,7 @@ export async function saveArtifacts(
   );
   await writeFile(
     join(report.artifactsDir, "report.html"),
-    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escape(safe.name)} · duit</title><style>body{font:16px system-ui;background:#10141d;color:#e6eaf2;max-width:1000px;margin:40px auto;padding:0 24px}h1{font-size:32px}article{background:#1a2130;padding:20px;border-radius:10px;margin:16px 0}small{color:#a8b8cf}pre{white-space:pre-wrap;overflow-wrap:anywhere}img{max-width:100%;border-radius:6px}a{color:#9ecbff}.passed{color:#78e7ae}.failed,.blocked{color:#ff9b9b}</style><h1>${escape(safe.name)}</h1><p class="${safe.status}">${safe.status.toUpperCase()} · ${(safe.durationMs / 1000).toFixed(2)} s · ${safe.mode}</p><small>${escape(safe.startedAt)} · ${safe.decisions.length} model requests</small>${safe.error ? `<pre>${escape(safe.error)}</pre>` : ""}${safe.screenshot ? `<details><summary>Startup screenshot</summary><img src="${escape(safe.screenshot)}" alt="Startup state"></details>` : ""}${safe.diagnostics ? `<details><summary>Connection and network diagnostics</summary><pre>${escape(JSON.stringify(safe.diagnostics, null, 2))}</pre></details>` : ""}${safe.interruptions?.length ? `<details><summary>Handled interruptions</summary><pre>${escape(JSON.stringify(safe.interruptions, null, 2))}</pre></details>` : ""}${safe.cleanup?.length ? `<details><summary>Cleanup</summary><pre>${escape(JSON.stringify(safe.cleanup, null, 2))}</pre></details>` : ""}${safe.steps.map((s) => `<article><b class="${s.status}">${s.index + 1}. ${s.status}</b><p>${escape(s.text)}</p><small>${s.durationMs} ms · ${escape(s.action?.operation ?? "unresolved")} · ${escape(s.action?.resolution ?? "page operation")}</small>${s.recoveredBy !== undefined ? `<p>Recovered by step ${s.recoveredBy + 1}</p>` : ""}${s.error ? `<pre>${escape(s.error)}</pre>` : ""}${s.evidence ? `<details><summary>Page and available controls (${escape(s.phase ?? "unknown phase")})</summary><pre>${escape(JSON.stringify(s.evidence, null, 2))}</pre></details>` : ""}${s.screenshot ? `<details><summary>Screenshot</summary><img src="${escape(s.screenshot)}" alt="Step ${s.index + 1}"></details>` : ""}</article>`).join("")}<p>${safe.warnings.map(escape).join("<br>")}</p><p><a href="report.json">JSON</a> · <a href="junit.xml">JUnit</a>${safe.status === "passed" && safe.mode !== "interactive" ? ' · <a href="replay.json">Replay plan</a>' : ""}</p></html>`,
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escape(safe.name)} · duit</title><style>body{font:16px system-ui;background:#10141d;color:#e6eaf2;max-width:1000px;margin:40px auto;padding:0 24px}h1{font-size:32px}article{background:#1a2130;padding:20px;border-radius:10px;margin:16px 0}small{color:#a8b8cf}pre{white-space:pre-wrap;overflow-wrap:anywhere}img{max-width:100%;border-radius:6px}a{color:#9ecbff}.passed{color:#78e7ae}.failed,.blocked{color:#ff9b9b}</style><h1>${escape(safe.name)}</h1><p class="${safe.status}">${safe.status.toUpperCase()} · ${(safe.durationMs / 1000).toFixed(2)} s · ${safe.mode}</p><small>${escape(safe.startedAt)} · ${safe.usage?.requests ?? safe.decisions.length} Jev requests</small>${safe.contentUsage?.requests ? `<p>Writer: ${safe.contentUsage.requests} calls · Estimated USD ${safe.contentUsage.estimatedUsd.toFixed(8)}${safe.contentUsage.complete ? "" : " (incomplete usage)"}</p>` : ""}${safe.usage ? `<p>Model calls: ${safe.usage.requests} · Input tokens: ${safe.usage.inputTokens} · Output tokens: ${safe.usage.outputTokens} · Estimated USD: ${safe.usage.estimatedUsd?.toFixed(8) ?? "unknown"}${safe.usage.complete ? "" : " (incomplete usage)"}</p><details><summary>Pricing and visual decisions</summary><pre>${escape(JSON.stringify({ usage: safe.usage, contentUsage: safe.contentUsage, visual: safe.visualDecisions }, null, 2))}</pre></details>` : ""}${safe.error ? `<pre>${escape(safe.error)}</pre>` : ""}${safe.screenshot ? `<details><summary>Startup screenshot</summary><img src="${escape(safe.screenshot)}" alt="Startup state"></details>` : ""}${safe.diagnostics ? `<details><summary>Connection and network diagnostics</summary><pre>${escape(JSON.stringify(safe.diagnostics, null, 2))}</pre></details>` : ""}${safe.interruptions?.length ? `<details><summary>Handled interruptions</summary><pre>${escape(JSON.stringify(safe.interruptions, null, 2))}</pre></details>` : ""}${safe.cleanup?.length ? `<details><summary>Cleanup</summary><pre>${escape(JSON.stringify(safe.cleanup, null, 2))}</pre></details>` : ""}${safe.steps.map((s) => `<article><b class="${s.status}">${s.index + 1}. ${s.status}</b><p>${escape(s.text)}</p><small>${s.durationMs} ms · ${escape(s.action?.operation ?? "unresolved")} · ${escape(s.action?.resolution ?? "page operation")}</small>${s.recoveredBy !== undefined ? `<p>Recovered by step ${s.recoveredBy + 1}</p>` : ""}${s.error ? `<pre>${escape(s.error)}</pre>` : ""}${s.evidence ? `<details><summary>Page and available controls (${escape(s.phase ?? "unknown phase")})</summary><pre>${escape(JSON.stringify(s.evidence, null, 2))}</pre></details>` : ""}${s.visualScreenshot ? `<details><summary>Visual decision viewport</summary><img src="${escape(s.visualScreenshot)}" alt="Viewport used for visual decision"><pre>${escape(JSON.stringify(s.action?.visualTarget, null, 2) ?? "")}</pre></details>` : ""}${s.screenshot ? `<details><summary>Screenshot</summary><img src="${escape(s.screenshot)}" alt="Step ${s.index + 1}"></details>` : ""}</article>`).join("")}<p>${safe.warnings.map(escape).join("<br>")}</p><p><a href="report.json">JSON</a> · <a href="junit.xml">JUnit</a>${safe.status === "passed" && safe.mode !== "interactive" && replayable ? ' · <a href="replay.json">Replay plan</a>' : ""}</p></html>`,
   );
 }
 

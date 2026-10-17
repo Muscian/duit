@@ -2,7 +2,12 @@ import "../load-env.js";
 import { readFile } from "node:fs/promises";
 import { parse } from "yaml";
 import { z } from "zod";
-import { HarnessError, type CaseSpec } from "./types.js";
+import {
+  HarnessError,
+  operations,
+  type Operation,
+  type CaseSpec,
+} from "./types.js";
 
 const httpUrl = z
   .string()
@@ -27,6 +32,30 @@ export const stepSchema = z.union([
   z
     .object({
       instruction: z.string().trim().min(1).max(2000),
+      operation: z
+        .enum(
+          Object.keys(operations).filter((k) => k !== "unsupported") as [
+            Operation,
+            ...Operation[],
+          ],
+        )
+        .optional(),
+      value: z.string().max(10000).optional(),
+      control: z
+        .object({
+          name: z.string().min(1).max(500),
+          role: z.string().min(1).max(100).optional(),
+        })
+        .strict()
+        .optional(),
+      visual: z.enum(["fallback", "only", "off"]).optional(),
+      generate: z
+        .object({
+          prompt: z.string().min(1).max(4000),
+          maxChars: z.number().int().min(1).max(10000).optional(),
+        })
+        .strict()
+        .optional(),
       wait: assertionWaitSchema.optional(),
       context: z
         .object({ urlIncludes: z.string().min(1), text: z.string().min(1) })
@@ -41,6 +70,40 @@ export const stepSchema = z.union([
 export const caseSchema = z
   .object({
     name: z.string().trim().min(1).max(200),
+    content: z
+      .object({
+        enabled: z.boolean(),
+        maxRequests: z.number().int().positive().max(100),
+        maxUsd: z.number().positive(),
+        inputPerMillion: z.number().nonnegative(),
+        outputPerMillion: z.number().nonnegative(),
+        maxOutputTokens: z.number().int().min(1).max(4096).optional(),
+      })
+      .strict()
+      .optional(),
+    platform: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]*$/)
+      .optional(),
+    visual: z
+      .object({
+        enabled: z.boolean(),
+        minConfidence: z.number().min(0).max(1).optional(),
+        minProbability: z.number().min(0).max(1).optional(),
+        maxCalls: z.number().int().min(1).max(100).optional(),
+      })
+      .strict()
+      .optional(),
+    costs: z
+      .object({
+        maxRequests: z.number().int().positive().optional(),
+        maxInputTokens: z.number().int().positive().optional(),
+        maxUsd: z.number().positive().optional(),
+        inputPerMillion: z.number().nonnegative().optional(),
+        outputPerMillion: z.number().nonnegative().optional(),
+      })
+      .strict()
+      .optional(),
     baseUrl: httpUrl,
     steps: z.array(stepSchema).min(1).max(200),
     cleanup: z.array(stepSchema).max(50).optional(),

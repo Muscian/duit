@@ -1,5 +1,7 @@
+import { FieldWriter, type ContentProvider } from "./content.js";
+import { MeteredProvider } from "./metering.js";
 import "../load-env.js";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { resolve, join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { caseSchema, redactor, resolveVariables, substitute } from "./input.js";
@@ -22,6 +24,7 @@ import {
 
 export type RunOptions = {
   provider?: DecisionProvider;
+  contentProvider?: ContentProvider;
   platform: PlatformAdapter;
   artifactsDir?: string;
   policy?: Partial<DecisionPolicy>;
@@ -64,8 +67,13 @@ export async function runCase(
     warnings: [],
     artifactsDir,
   };
-  let sanitize = redactor({}, [process.env.JEV_API_KEY ?? ""]);
+  let sanitize = redactor({}, [
+    process.env.JEV_API_KEY ?? "",
+    process.env.DUIT_WRITER_API_KEY ?? "",
+  ]);
   let engine: DecisionEngine | undefined;
+  let writer: FieldWriter | undefined;
+  let metered: MeteredProvider | undefined;
   let executor: StepExecutor | undefined;
   let cleanupSteps: import("./types.js").CompiledStep[] = [];
   let opened = false;
@@ -89,7 +97,7 @@ export async function runCase(
           ([name]) => !spec.publicVariables?.includes(name),
         ),
       ),
-      [process.env.JEV_API_KEY ?? ""],
+      [process.env.JEV_API_KEY ?? "", process.env.DUIT_WRITER_API_KEY ?? ""],
     );
     const policy = { ...defaultPolicy, ...options.policy };
     for (const [key, value] of Object.entries(policy))
@@ -103,8 +111,11 @@ export async function runCase(
         "MISSING_PROVIDER",
         "Live runs require a decision provider",
       );
-    engine = options.provider
-      ? new DecisionEngine(options.provider, policy, sanitize)
+    metered = options.provider
+      ? new MeteredProvider(options.provider, spec.costs)
+      : undefined;
+    engine = metered
+      ? new DecisionEngine(metered, policy, sanitize)
       : undefined;
     const steps =
       options.replay?.actions ?? (await engine!.compile(spec.steps, signal));
@@ -116,12 +127,26 @@ export async function runCase(
     cleanupSteps = spec.cleanup?.length
       ? await engine!.compile(spec.cleanup, signal)
       : [];
+    writer = new FieldWriter(options.contentProvider, spec.content, sanitize);
     report.interruptions = [];
     executor = new StepExecutor({
       platform: options.platform,
       engine,
       variables,
       interruptions: options.replay ? undefined : spec.interruptions,
+      visual: spec.visual,
+      writer,
+      onVisualFrame:
+        options.screenshots === false
+          ? undefined
+          : async (frame) => {
+              const name = `visual-${frame.revision.slice(0, 12)}.png`;
+              await writeFile(
+                join(artifactsDir, name),
+                Buffer.from(frame.dataBase64, "base64"),
+              );
+              return name;
+            },
       events: report.interruptions,
       readinessTimeoutMs: options.readinessTimeoutMs,
       onInterruptionAction: (action) => actions.push(action),
@@ -141,8 +166,10 @@ export async function runCase(
     // Validate variables before touching the UI.
     for (const step of [...steps, ...cleanupSteps]) {
       for (const text of [
+        step.generate?.prompt,
+        step.control?.name,
         step.text,
-        step.value,
+        step.literalValue ? undefined : step.value,
         step.scope,
         step.context?.text,
         step.context?.urlIncludes,
@@ -290,6 +317,21 @@ export async function runCase(
     }
     report.durationMs = Math.round(performance.now() - started);
     report.decisions = engine?.events ?? [];
+    report.visualDecisions = engine?.visualEvents ?? [];
+    report.contentUsage = writer ? { ...writer.usage } : undefined;
+    report.usage = metered
+      ? { ...metered.usage }
+      : {
+          requests: 0,
+          failedRequests: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          estimatedUsd: 0,
+          inputPerMillion: 0,
+          outputPerMillion: 0,
+          pricingSource: "No model used",
+          complete: true,
+        };
     await saveArtifacts(report, spec, actions, sanitize);
     await saveCheckpoint(report, sanitize, "closed");
   }

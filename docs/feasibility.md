@@ -1,5 +1,7 @@
 # Feasibility: Jev as the only model at runtime
 
+This records the original Jev-only evaluation. The default runtime still uses Jev for decisions; version 0.2 also offers an explicitly enabled, separately budgeted field writer. See [current capabilities and boundaries](visual-writing-costs.md).
+
 Validation was performed on **October 16, 2026** with Node.js 24, Chromium/Playwright, and the pinned **`jev-1.14.0`** model. The credential used was `JEV_API_KEY`; the official API returned HTTP 200. No other LLM was involved in harness runs.
 
 ## Result

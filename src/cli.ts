@@ -9,15 +9,21 @@ import { randomUUID } from "node:crypto";
 import { loadCase, resolveVariables } from "./core/input.js";
 import { runCase } from "./core/runner.js";
 import { parseReplay } from "./core/replay.js";
-import { JevProvider } from "./providers/jev.js";
+import { browserService, lazyJev } from "./services/browser-service.js";
+import { lazyWriter } from "./providers/openai-content.js";
+import { caseJsonSchema, validateCase } from "./core/authoring.js";
 import { BrowserAdapter, type BrowserOptions } from "./platforms/browser.js";
 
-const help = `duit — natural-language UI tests powered only by Jev\n\n  npm run duit -- run case.yaml [options]\n  npm run duit -- run steps.txt --base-url http://localhost:4173\n  npm run duit -- replay artifacts/<run>/replay.json [options]\n  npm run duit -- explore case.yaml [options]  # Retain browser after a blocked step\n\nOptions:\n  --base-url URL         Override starting URL (required for .txt/.md)\n  --out DIRECTORY       New artifact directory (must not already exist)\n  --browser NAME        chromium (default), firefox, webkit\n  --channel NAME        Chromium distribution: chrome, msedge, chromium (fresh session)\n  --allow-local-network-origin URL  Grant local-network access to this page origin; repeatable\n  --proxy URL           Override browser proxy; default inherits HTTP(S)_PROXY. Use "direct" to opt out\n  --headed              Show the browser\n  --timeout MS          Playwright action/assertion timeout (default 5000)\n  --navigation-timeout MS  Document and SPA readiness timeout (default 30000)\n  --budget MS           Whole-run deadline (default 300000)\n  --min-probability N    Decision threshold 0..1 (default 0.70)\n  --allow-origin URL    Allow additional navigation origin; repeatable\n  --storage-state FILE  Playwright authentication state\n  --trace               Record an unredacted Playwright trace (opt in)\n  --no-screenshots       Disable masked screenshots\n\nExit codes: 0 passed, 1 assertion/action failed, 2 blocked/configuration error.\n`;
+const help = `duit — UI tests with Jev decisions and an optional field writer\n\n  npm run duit -- schema | validate case.yaml | serve | mcp\n  npm run duit -- run case.yaml [options]\n  npm run duit -- run steps.txt --base-url http://localhost:4173\n  npm run duit -- replay artifacts/<run>/replay.json [options]\n  npm run duit -- explore case.yaml [options]  # Retain browser after a blocked step\n\nOptions:\n  --visual              Enable experimental Jev screenshot click fallback\n  --max-requests N      Stop new Jev calls after this per-run limit\n  --max-cost-usd N      Stop new calls after reported spend reaches this estimate\n  --port N              Local API port (default 4318); DUIT_API_TOKEN sets bearer token\n  --base-url URL         Override starting URL (required for .txt/.md)\n  --out DIRECTORY       New artifact directory (must not already exist)\n  --browser NAME        chromium (default), firefox, webkit\n  --channel NAME        Chromium distribution: chrome, msedge, chromium (fresh session)\n  --allow-local-network-origin URL  Grant local-network access to this page origin; repeatable\n  --proxy URL           Override browser proxy; default inherits HTTP(S)_PROXY. Use "direct" to opt out\n  --headed              Show the browser\n  --timeout MS          Playwright action/assertion timeout (default 5000)\n  --navigation-timeout MS  Document and SPA readiness timeout (default 30000)\n  --budget MS           Whole-run deadline (default 300000)\n  --min-probability N    Decision threshold 0..1 (default 0.70)\n  --allow-origin URL    Allow additional navigation origin; repeatable\n  --storage-state FILE  Playwright authentication state\n  --trace               Record an unredacted Playwright trace (opt in)\n  --no-screenshots       Disable masked screenshots\n\nExit codes: 0 passed, 1 assertion/action failed, 2 blocked/configuration error.\n`;
 async function main() {
   const { values: v, positionals: p } = parseArgs({
     allowPositionals: true,
     options: {
       help: { type: "boolean", short: "h" },
+      visual: { type: "boolean" },
+      "max-requests": { type: "string" },
+      "max-cost-usd": { type: "string" },
+      port: { type: "string" },
       "base-url": { type: "string" },
       out: { type: "string" },
       browser: { type: "string" },
@@ -40,6 +46,54 @@ async function main() {
     return;
   }
   const [command, file] = p;
+  if (command === "schema") {
+    console.log(JSON.stringify(caseJsonSchema(), null, 2));
+    return;
+  }
+  if (command === "serve" || command === "mcp") {
+    const service = browserService(v.out);
+    if (command === "serve") {
+      const { startHttp } = await import("./services/http.js");
+      const server = await startHttp(service, {
+        port: v.port ? Number(v.port) : undefined,
+        token: process.env.DUIT_API_TOKEN || undefined,
+      });
+      console.error(`DUIT API ${server.url}\nBearer token: ${server.token}`);
+      const stop = () => {
+        void server.close().then(() => process.exit(0));
+      };
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+    } else {
+      const { createMcpServer } = await import("./services/mcp.js");
+      const { StdioServerTransport } =
+        await import("@modelcontextprotocol/sdk/server/stdio.js");
+      const server = createMcpServer(service);
+      await server.connect(new StdioServerTransport());
+      server.server.onclose = () => {
+        void service.close();
+      };
+      const stop = () => {
+        void service
+          .close()
+          .then(() => server.close())
+          .then(() => process.exit(0));
+      };
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+    }
+    return;
+  }
+  if (command === "validate" && file) {
+    console.log(
+      JSON.stringify(
+        validateCase(await loadCase(file, v["base-url"])),
+        null,
+        2,
+      ),
+    );
+    return;
+  }
   if (
     !["run", "replay", "explore"].includes(command) ||
     !file ||
@@ -89,7 +143,15 @@ async function main() {
       ),
   );
   await mkdir(resolve(out, ".."), { recursive: true });
-  const provider = replay ? undefined : new JevProvider();
+  if (v.visual) spec.visual = { ...spec.visual, enabled: true };
+  if (v["max-requests"] || v["max-cost-usd"])
+    spec.costs = {
+      ...spec.costs,
+      ...(v["max-requests"] ? { maxRequests: Number(v["max-requests"]) } : {}),
+      ...(v["max-cost-usd"] ? { maxUsd: Number(v["max-cost-usd"]) } : {}),
+    };
+  const provider = replay ? undefined : lazyJev();
+  const writer = !replay && spec.content?.enabled ? lazyWriter() : undefined;
   const platform = new BrowserAdapter({
     browser: browser as BrowserOptions["browser"],
     channel: (v.channel ?? spec.browser?.channel) as BrowserOptions["channel"],
@@ -121,6 +183,7 @@ async function main() {
     if (command === "explore") {
       const session = new HarnessSession(spec, {
         provider: provider!,
+        contentProvider: writer,
         platform,
         artifactsDir: out,
         signal: controller.signal,
@@ -232,7 +295,7 @@ async function main() {
       } finally {
         const report = await session.close();
         console.log(
-          `${report.status.toUpperCase()} · Report: ${join(out, "report.html")}`,
+          `${report.status.toUpperCase()} · Jev: ${report.usage?.requests ?? 0} calls, estimated USD ${report.usage?.estimatedUsd?.toFixed(8) ?? "unknown"} · Writer: ${report.contentUsage?.requests ?? 0} calls, estimated USD ${(report.contentUsage?.estimatedUsd ?? 0).toFixed(8)} · Report: ${join(out, "report.html")}`,
         );
         process.exitCode = report.status === "passed" ? 0 : 2;
       }
@@ -240,6 +303,7 @@ async function main() {
     }
     const report = await runCase(spec, {
       provider,
+      contentProvider: writer,
       platform,
       artifactsDir: out,
       replay,
@@ -263,15 +327,20 @@ async function main() {
         ),
     });
     console.log(
-      `\n${report.status.toUpperCase()} · ${(report.durationMs / 1000).toFixed(2)}s · ${report.decisions.length} Jev requests\nReport: ${join(out, "report.html")}`,
+      `\n${report.status.toUpperCase()} · ${(report.durationMs / 1000).toFixed(2)}s · ${report.usage?.requests ?? report.decisions.length} Jev requests · estimated USD ${report.usage?.estimatedUsd?.toFixed(8) ?? "unknown"}\nReport: ${join(out, "report.html")}`,
     );
+    if (report.contentUsage?.requests)
+      console.log(
+        `Writer: ${report.contentUsage.requests} calls · estimated USD ${report.contentUsage.estimatedUsd.toFixed(8)}${report.contentUsage.complete ? "" : " (incomplete usage)"}`,
+      );
     if (report.error) console.error(report.error);
     process.exitCode =
       report.status === "passed" ? 0 : report.status === "failed" ? 1 : 2;
   } finally {
     process.removeListener("SIGINT", interrupt);
     process.removeListener("SIGTERM", interrupt);
-    await provider?.close();
+    await provider?.close?.();
+    await writer?.close?.();
   }
 }
 main().catch((error) => {

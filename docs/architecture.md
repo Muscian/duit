@@ -18,7 +18,7 @@
 6. Playwright executes a closed operation with a strict locator. It prefers a unique test id, label, or role/name; otherwise it uses observed CSS. Jev-generated selectors, evals, and invented actions are not accepted.
 7. Assertions use Playwright `expect`/polling. Only successful execution of all actions and assertions produces `passed`.
 
-Page assertions (text and URL) do not need an element selection. Control assertions use Jev to interpret which control the step refers to, and Playwright to measure its state. This removes an LLM judge from the result but does not eliminate interpretation errors: always review that the resolved case represents the intended behavior.
+Page assertions (text and URL) do not need an element selection. Control assertions use an explicit observed control contract or Jev to identify the control, and Playwright to measure its state. This removes an LLM judge from the result but does not eliminate interpretation errors: always review that the resolved case represents the intended behavior.
 
 ## Navigation, selectors, and async behavior
 
@@ -49,3 +49,11 @@ The model defaults to the pinned `jev-1.14.0`. Changing the model or policy requ
 These extensions are not implemented and are not required to run the current examples.
 
 See [runtime authoring](runtime-authoring.md) for context/scoping semantics, bounded interruptions, checkpoints and recovery limitations. Interactive reports preserve failed attempts and their recovery links; successful interactive sessions deliberately do not export a replay.
+
+## Service and optional model boundaries
+
+`DuitService` owns asynchronous runs and retained sessions. `PlatformRegistry` supplies adapters; the browser service factory is the only default-service layer constructing Playwright. HTTP and MCP share capacity, lifecycle, inspection and recovery behavior. They are trusted local interfaces, not a multi-user isolation boundary.
+
+`PlatformAdapter.observeVisual` and `DecisionProvider.locate` are optional capabilities using a platform-neutral image, revision and normalized box contract. The browser adapter owns screenshot masking, coordinate conversion and stale-frame checks. Core orchestration cannot turn visual decisions into arbitrary code or assertions. Nonvisual adapters need not implement image support.
+
+`ContentProvider` is separate from `DecisionProvider`. An explicitly configured `FieldWriter` produces bounded text only for fill steps; its cache, cost and replay literals are independent from Jev decisions. `MeteredProvider` accounts for Jev calls per run. Explicit operation/value/control steps and generic single-field roles can avoid model calls without weakening ambiguous-target gates.

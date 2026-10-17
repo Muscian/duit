@@ -1,0 +1,7 @@
+name: Nested frames - deterministic assertions
+baseUrl: https://the-internet.herokuapp.com/nested_frames
+steps:
+  - Verify the text "LEFT" is visible
+  - Verify the text "MIDDLE" is visible
+  - Verify the text "RIGHT" is visible
+  - Verify the text "BOTTOM" is visible

@@ -1,3 +1,4 @@
+import type { FieldWriter } from "./content.js";
 import { DecisionEngine } from "./decisions.js";
 import { substitute } from "./input.js";
 import {
@@ -10,6 +11,8 @@ import {
   type ResolvedAction,
   type RunReport,
   type StepResult,
+  type VisualOptions,
+  type VisualFrame,
 } from "./types.js";
 
 export const evidence = (
@@ -66,6 +69,9 @@ export class StepExecutor {
       engine?: DecisionEngine;
       variables: Record<string, string>;
       interruptions?: InterruptionRule[];
+      visual?: VisualOptions;
+      writer?: FieldWriter;
+      onVisualFrame?: (frame: VisualFrame) => Promise<string>;
       events: NonNullable<RunReport["interruptions"]>;
       readinessTimeoutMs?: number;
       onInterruptionAction?: (action: ResolvedAction) => void;
@@ -285,14 +291,44 @@ export class StepExecutor {
         "scope selects a target control; use context for page-wide assertions/navigation",
       );
     for (const text of [
+      step.generate?.prompt,
+      step.control?.name,
       step.text,
-      step.value,
+      step.literalValue ? undefined : step.value,
       step.scope,
       step.context?.text,
       step.context?.urlIncludes,
       ...(step.aliases ?? []),
     ])
       if (text !== undefined) substitute(text, variables);
+    const visualEnabled =
+      step.operation === "click" &&
+      step.visual !== "off" &&
+      this.options.visual?.enabled;
+    const visualResolve = async () => {
+      if (!platform.observeVisual || !engine)
+        throw new HarnessError(
+          "VISUAL_UNAVAILABLE",
+          "Adapter/provider cannot observe and resolve a visual target",
+        );
+      const frame = await platform.observeVisual();
+      result.visualScreenshot = await this.options.onVisualFrame?.(frame);
+      return engine.resolveVisual(
+        {
+          ...step,
+          text: substitute(step.text, variables),
+          scope: step.scope ? substitute(step.scope, variables) : undefined,
+        },
+        frame,
+        this.options.visual!,
+        signal,
+      );
+    };
+    if (step.visual === "only" && !visualEnabled)
+      throw new HarnessError(
+        "VISUAL_UNAVAILABLE",
+        "Enable case.visual.enabled for visual-only clicks",
+      );
     let deadline = Date.now() + (this.options.readinessTimeoutMs ?? 15000);
     let action: ResolvedAction | undefined;
     let lastError: unknown;
@@ -335,11 +371,17 @@ export class StepExecutor {
       fingerprint = nextFingerprint;
       try {
         const resolved =
-          replay ??
+          (step.visual === "only" ? await visualResolve() : replay) ??
           (await engine!.resolve(
             {
               ...step,
               text: substitute(step.text, variables),
+              control: step.control
+                ? {
+                    ...step.control,
+                    name: substitute(step.control.name, variables),
+                  }
+                : undefined,
               scope: step.scope ? substitute(step.scope, variables) : undefined,
               aliases: step.aliases?.map((s) => substitute(s, variables)),
             },
@@ -350,6 +392,16 @@ export class StepExecutor {
         break;
       } catch (error) {
         lastError = error;
+        if (
+          visualEnabled &&
+          error instanceof HarnessError &&
+          ["NO_TARGET", "UNCERTAIN_DECISION", "TOO_MANY_ELEMENTS"].includes(
+            error.code,
+          )
+        ) {
+          action = await visualResolve();
+          break;
+        }
         if (
           !(error instanceof HarnessError) ||
           !["NO_TARGET", "UNCERTAIN_DECISION"].includes(error.code) ||
@@ -374,7 +426,9 @@ export class StepExecutor {
       value:
         action.value === undefined
           ? undefined
-          : substitute(action.value, variables),
+          : action.literalValue
+            ? action.value
+            : substitute(action.value, variables),
     };
     for (let attempt = 0; ; attempt++) {
       result.action = action;
@@ -415,6 +469,12 @@ export class StepExecutor {
             {
               ...step,
               text: substitute(step.text, variables),
+              control: step.control
+                ? {
+                    ...step.control,
+                    name: substitute(step.control.name, variables),
+                  }
+                : undefined,
               scope: step.scope ? substitute(step.scope, variables) : undefined,
               aliases: step.aliases?.map((s) => substitute(s, variables)),
             },
@@ -428,11 +488,40 @@ export class StepExecutor {
           value:
             action.value === undefined
               ? undefined
-              : substitute(action.value, variables),
+              : action.literalValue
+                ? action.value
+                : substitute(action.value, variables),
         };
       }
     }
     signal?.throwIfAborted();
+    if (step.generate) {
+      if (step.operation !== "fill" || !this.options.writer)
+        throw new HarnessError(
+          "CONTENT_PROVIDER_REQUIRED",
+          "Generated fills require an explicitly configured writer",
+        );
+      const generated = await this.options.writer.write(
+        {
+          ...step.generate,
+          prompt: substitute(step.generate.prompt, variables),
+        },
+        signal,
+      );
+      action = {
+        ...action,
+        generate: undefined,
+        value: generated.text,
+        literalValue: true,
+      };
+      resolved = {
+        ...resolved,
+        generate: undefined,
+        value: generated.text,
+        literalValue: true,
+      };
+      result.action = action;
+    }
     result.phase = action.operation.startsWith("assert_")
       ? "assert"
       : "dispatch";

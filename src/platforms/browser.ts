@@ -1,4 +1,5 @@
 import "../load-env.js";
+import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   chromium,
@@ -20,6 +21,7 @@ import {
   type Observation,
   type PlatformAdapter,
   type ResolvedAction,
+  type VisualFrame,
 } from "../core/types.js";
 
 import { browserConnection, diagnosticUrl } from "./browser-network.js";
@@ -538,6 +540,10 @@ export class BrowserAdapter implements PlatformAdapter {
   }
   private async prepareAction(action: ResolvedAction): Promise<void> {
     await this.settlePopups();
+    if (action.visualTarget) {
+      await this.validateVisual(action);
+      return;
+    }
     if (!action.target || action.operation.startsWith("assert_")) return;
     const target = this.locator(action.target);
     try {
@@ -596,6 +602,15 @@ export class BrowserAdapter implements PlatformAdapter {
     const timeout = this.options.timeoutMs ?? 5000;
     const op = action.operation;
     const value = action.value ?? "";
+    if (action.visualTarget) {
+      await this.validateVisual(action);
+      const v = action.visualTarget;
+      await page.mouse.click(
+        ((v.box.left + v.box.right) * v.width) / 2,
+        ((v.box.top + v.box.bottom) * v.height) / 2,
+      );
+      return;
+    }
     if (op === "goto") {
       const url = new URL(value, this.baseUrl);
       if (!this.origins.has(url.origin))
@@ -605,15 +620,22 @@ export class BrowserAdapter implements PlatformAdapter {
         );
       await this.navigate(url.href);
     } else if (op === "assert_url") {
-      await expect(page).toHaveURL(new URL(value, this.baseUrl).href, {
-        timeout,
-      });
+      await expect
+        .poll(
+          async () => {
+            await this.settlePopups();
+            return this.current().url();
+          },
+          { timeout },
+        )
+        .toBe(new URL(value, this.baseUrl).href);
     } else if (op === "assert_text" || op === "assert_no_text") {
       // Any visible exact text match suffices. Duplicate hidden templates cannot make a positive assertion pass.
       await expect
         .poll(
           async () => {
-            for (const frame of page.frames())
+            await this.settlePopups();
+            for (const frame of this.current().frames())
               for (const match of await frame
                 .getByText(value, { exact: true })
                 .all())
@@ -674,6 +696,9 @@ export class BrowserAdapter implements PlatformAdapter {
         case "assert_hidden":
           await expect(target).toBeHidden({ timeout });
           break;
+        case "assert_nonempty":
+          await expect(target).toHaveValue(/\S/, { timeout });
+          break;
         case "assert_value":
           await expect(target).toHaveValue(value, { timeout });
           break;
@@ -692,6 +717,88 @@ export class BrowserAdapter implements PlatformAdapter {
       }
     }
     this.current();
+  }
+  async observeVisual(): Promise<VisualFrame> {
+    await this.settlePopups();
+    const page = this.current(),
+      size = page.viewportSize();
+    if (
+      !size ||
+      Math.min(size.width, size.height) < 280 ||
+      Math.max(size.width, size.height) > 1568
+    )
+      throw new HarnessError(
+        "VISUAL_VIEWPORT_UNSUPPORTED",
+        "Visual viewport dimensions must be 280–1568 CSS pixels",
+      );
+    const mask = page
+      .frames()
+      .flatMap((frame) => [
+        frame.locator('input,textarea,[contenteditable="true"]'),
+        ...(this.options.maskValues ?? [])
+          .filter(Boolean)
+          .map((value) => frame.getByText(value, { exact: false })),
+      ]);
+    const bytes = await page.screenshot({
+      fullPage: false,
+      scale: "css",
+      animations: "disabled",
+      caret: "hide",
+      mask,
+      timeout: 5000,
+    });
+    const scroll = await page.evaluate(() => [window.scrollX, window.scrollY]);
+    return {
+      format: "png",
+      dataBase64: bytes.toString("base64"),
+      width: size.width,
+      height: size.height,
+      url: page.url(),
+      revision: createHash("sha256")
+        .update(bytes)
+        .update(JSON.stringify([page.url(), scroll, size]))
+        .digest("hex"),
+    };
+  }
+  private async validateVisual(action: ResolvedAction) {
+    const v = action.visualTarget!;
+    if (action.operation !== "click")
+      throw new HarnessError(
+        "INVALID_VISUAL_OPERATION",
+        "Visual targets support click only",
+      );
+    const frame = await this.observeVisual();
+    if (
+      frame.revision !== v.revision ||
+      frame.width !== v.width ||
+      frame.height !== v.height
+    )
+      throw new HarnessError(
+        "VISUAL_FRAME_CHANGED",
+        "Viewport changed after visual decision; inspect again before clicking",
+      );
+    const b = v.box;
+    if (
+      Object.values(b).some((n) => !Number.isFinite(n) || n < 0 || n > 1) ||
+      b.left >= b.right ||
+      b.top >= b.bottom
+    )
+      throw new HarnessError("INVALID_VISUAL_TARGET", "Invalid normalized box");
+    const hit = await this.current().evaluate(
+      ({ x, y }) => {
+        const e = document.elementFromPoint(x, y);
+        return !!e && !e.closest('[disabled],[aria-disabled="true"],[inert]');
+      },
+      {
+        x: ((b.left + b.right) * v.width) / 2,
+        y: ((b.top + b.bottom) * v.height) / 2,
+      },
+    );
+    if (!hit)
+      throw new HarnessError(
+        "UI_NOT_ACTIONABLE",
+        "Visual target is disabled or outside the page",
+      );
   }
   async capture(path: string): Promise<void> {
     const page = this.current();

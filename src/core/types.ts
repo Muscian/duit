@@ -1,3 +1,4 @@
+import type { GenerateField, ContentOptions, FieldWriter } from "./content.js";
 export const operations = {
   click: "Click or activate a button, link or control",
   fill: "Type or replace text in an input or textarea",
@@ -12,6 +13,7 @@ export const operations = {
   assert_visible: "Verify that a described element is visible",
   assert_hidden: "Verify that a described element is hidden or absent",
   assert_value: "Verify the exact value of a form field",
+  assert_nonempty: "Verify a form field contains non-whitespace text",
   assert_checked: "Verify a checkbox/radio is checked",
   assert_unchecked: "Verify a checkbox/radio is unchecked",
   assert_enabled: "Verify a control is enabled",
@@ -53,7 +55,62 @@ export type DecisionResponse = {
   answers: Record<string, ChoiceAnswer>;
   usage: { input_tokens: number; output_tokens: number };
 };
+export type VisualFrame = {
+  format: "png";
+  dataBase64: string;
+  width: number;
+  height: number;
+  revision: string;
+  url?: string;
+};
+export type Box = { left: number; top: number; right: number; bottom: number };
+export type VisualResponse = {
+  model: string;
+  answers: {
+    presence: ChoiceAnswer;
+    target: { type: "box"; box: Box; confidence: number };
+  };
+  usage: DecisionResponse["usage"];
+};
+export type VisualTarget = {
+  box: Box;
+  revision: string;
+  width: number;
+  height: number;
+  confidence: number;
+  presenceProbability: number;
+};
+export type VisualOptions = {
+  enabled: boolean;
+  minConfidence?: number;
+  minProbability?: number;
+  maxCalls?: number;
+};
+export type CostOptions = {
+  maxRequests?: number;
+  maxInputTokens?: number;
+  maxUsd?: number;
+  inputPerMillion?: number;
+  outputPerMillion?: number;
+};
+export type UsageSummary = {
+  requests: number;
+  failedRequests: number;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedUsd: number | null;
+  pricingSource: string;
+  inputPerMillion: number | null;
+  outputPerMillion: number | null;
+  complete: boolean;
+};
 export interface DecisionProvider {
+  locate?(
+    frame: VisualFrame,
+    instruction: string,
+    signal?: AbortSignal,
+  ): Promise<VisualResponse>;
+  close?(): Promise<void>;
   decide(
     state: unknown,
     questions: Record<string, ChoiceQuestion>,
@@ -102,6 +159,11 @@ export type StepInstruction =
   | string
   | {
       instruction: string;
+      operation?: Operation;
+      generate?: GenerateField;
+      value?: string;
+      control?: { name: string; role?: string };
+      visual?: "fallback" | "only" | "off";
       context?: StepContext;
       scope?: string;
       aliases?: string[];
@@ -114,6 +176,10 @@ export type InterruptionRule = {
   maxRuns?: number;
 };
 export type CompiledStep = {
+  literalValue?: boolean;
+  generate?: GenerateField;
+  control?: { name: string; role?: string };
+  visual?: "fallback" | "only" | "off";
   wait?: AssertionWait;
   context?: StepContext;
   scope?: string;
@@ -124,7 +190,8 @@ export type CompiledStep = {
 };
 export type ResolvedAction = CompiledStep & {
   target?: LocatorSpec;
-  resolution?: "exact-label" | "jev";
+  visualTarget?: VisualTarget;
+  resolution?: "exact-label" | "unique-role" | "jev" | "jev-box";
 };
 export type PlatformDiagnostics = {
   url?: string;
@@ -152,6 +219,7 @@ export type PlatformDiagnostics = {
 export interface PlatformAdapter {
   open(url: string): Promise<void>;
   observe(step?: CompiledStep): Promise<Observation>;
+  observeVisual?(): Promise<VisualFrame>;
   execute(action: ResolvedAction): Promise<void>;
   prepare?(action: ResolvedAction): Promise<void>;
   refresh?(controlName?: string): Promise<void>;
@@ -161,6 +229,10 @@ export interface PlatformAdapter {
   diagnostics?(): PlatformDiagnostics;
 }
 export type CaseSpec = {
+  platform?: string;
+  content?: ContentOptions;
+  visual?: VisualOptions;
+  costs?: CostOptions;
   name: string;
   baseUrl: string;
   steps: StepInstruction[];
@@ -190,6 +262,7 @@ export type StepResult = {
   action?: ResolvedAction;
   error?: string;
   screenshot?: string;
+  visualScreenshot?: string;
   phase?:
     | "compile"
     | "context"
@@ -219,6 +292,16 @@ export type RunReport = {
   durationMs: number;
   steps: StepResult[];
   decisions: DecisionEvent[];
+  visualDecisions?: Array<{
+    instruction: string;
+    revision: string;
+    width: number;
+    height: number;
+    durationMs: number;
+    response: VisualResponse;
+  }>;
+  usage?: UsageSummary;
+  contentUsage?: FieldWriter["usage"];
   error?: string;
   warnings: string[];
   interruptions?: Array<{

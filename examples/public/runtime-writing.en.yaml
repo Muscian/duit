@@ -1,0 +1,22 @@
+name: Selenium form - optional runtime writer
+baseUrl: https://www.selenium.dev/selenium/web/web-form.html
+# Example rates only: replace these with your writer model's actual contract.
+content:
+  enabled: true
+  maxRequests: 1
+  maxUsd: 0.01
+  inputPerMillion: 1
+  outputPerMillion: 4
+  maxOutputTokens: 100
+steps:
+  - instruction: Write a short test note in Textarea
+    operation: fill
+    control: { name: Textarea }
+    generate:
+      prompt: Write a single sentence of synthetic feedback about a fictional calendar app. No personal data. Maximum 120 characters.
+      maxChars: 120
+  - instruction: Verify Textarea is not empty
+    operation: assert_nonempty
+    control: { name: Textarea }
+  - Click Submit
+  - Verify the text "Received!" is visible

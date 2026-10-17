@@ -1,0 +1,11 @@
+name: Selenium public form - natural language
+baseUrl: https://www.selenium.dev/selenium/web/web-form.html
+browser:
+  timeoutMs: 10000
+steps:
+  - Enter "DUIT public demo" in Text input
+  - Enter "Synthetic test note" in Textarea
+  - Select "Two" in Dropdown (select)
+  - Check Default checkbox
+  - Click Submit
+  - Verify the text "Received!" is visible

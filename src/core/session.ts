@@ -1,4 +1,6 @@
-import { mkdir } from "node:fs/promises";
+import { FieldWriter, type ContentProvider } from "./content.js";
+import { MeteredProvider } from "./metering.js";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
@@ -24,6 +26,8 @@ import {
 export class HarnessSession {
   readonly report: RunReport;
   private engine: DecisionEngine;
+  private metered: MeteredProvider;
+  private writer: FieldWriter;
   private executor: StepExecutor;
   private sanitize: (s: string) => string;
   private spec: CaseSpec;
@@ -39,6 +43,7 @@ export class HarnessSession {
     input: CaseSpec,
     private options: {
       provider: DecisionProvider;
+      contentProvider?: ContentProvider;
       platform: PlatformAdapter;
       artifactsDir?: string;
       policy?: Partial<DecisionPolicy>;
@@ -56,7 +61,7 @@ export class HarnessSession {
           ([name]) => !this.spec.publicVariables?.includes(name),
         ),
       ),
-      [process.env.JEV_API_KEY ?? ""],
+      [process.env.JEV_API_KEY ?? "", process.env.DUIT_WRITER_API_KEY ?? ""],
     );
     const policy = { ...defaultPolicy, ...options.policy };
     if (
@@ -66,7 +71,8 @@ export class HarnessSession {
         "INVALID_POLICY",
         "Decision thresholds must be between 0 and 1",
       );
-    this.engine = new DecisionEngine(options.provider, policy, this.sanitize);
+    this.metered = new MeteredProvider(options.provider, this.spec.costs);
+    this.engine = new DecisionEngine(this.metered, policy, this.sanitize);
     this.report = {
       version: 1,
       name: this.spec.name,
@@ -86,11 +92,29 @@ export class HarnessSession {
           ),
       ),
     };
+    this.writer = new FieldWriter(
+      options.contentProvider,
+      this.spec.content,
+      this.sanitize,
+    );
     this.executor = new StepExecutor({
       platform: options.platform,
       engine: this.engine,
       variables,
       interruptions: this.spec.interruptions,
+      visual: this.spec.visual,
+      writer: this.writer,
+      onVisualFrame:
+        options.screenshots === false
+          ? undefined
+          : async (frame) => {
+              const name = `visual-${frame.revision.slice(0, 12)}.png`;
+              await writeFile(
+                join(this.report.artifactsDir, name),
+                Buffer.from(frame.dataBase64, "base64"),
+              );
+              return name;
+            },
       events: this.report.interruptions!,
       readinessTimeoutMs: options.readinessTimeoutMs,
       beforeDispatch: () => this.persist(),
@@ -278,6 +302,9 @@ export class HarnessSession {
   private async persist() {
     this.report.durationMs = Math.round(performance.now() - this.started);
     this.report.decisions = this.engine.events;
+    this.report.visualDecisions = this.engine.visualEvents;
+    this.report.contentUsage = { ...this.writer.usage };
+    this.report.usage = { ...this.metered.usage };
     this.report.diagnostics = this.options.platform.diagnostics?.();
     await saveArtifacts(this.report, this.spec, [], this.sanitize);
     await saveCheckpoint(

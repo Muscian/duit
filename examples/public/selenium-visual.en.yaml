@@ -1,0 +1,13 @@
+name: Selenium form - screenshot-targeted submit
+baseUrl: https://www.selenium.dev/selenium/web/web-form.html
+visual:
+  enabled: true
+  maxCalls: 1
+costs:
+  maxRequests: 12
+  maxUsd: 0.01
+steps:
+  - Enter "DUIT visual demo" in Text input
+  - instruction: Click the Submit button
+    visual: only
+  - Verify the text "Received!" is visible

@@ -28,6 +28,10 @@ const actionSchema = z
       .strict()
       .optional(),
     scope: z.string().optional(),
+    control: z
+      .object({ name: z.string(), role: z.string().optional() })
+      .optional(),
+    visual: z.enum(["fallback", "only", "off"]).optional(),
     aliases: z.array(z.string()).optional(),
     operation: z.enum(
       Object.keys(operations).filter((x) => x !== "unsupported") as [
@@ -36,8 +40,9 @@ const actionSchema = z
       ],
     ),
     value: z.string().max(10000).optional(),
+    literalValue: z.boolean().optional(),
     target: locatorSchema.optional(),
-    resolution: z.enum(["exact-label", "jev"]).optional(),
+    resolution: z.enum(["exact-label", "unique-role", "jev"]).optional(),
   })
   .strict()
   .superRefine((a, ctx) => {
