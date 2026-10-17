@@ -4,7 +4,7 @@
 
 - `DecisionProvider.decide(state, questions, signal)` returns typed Choice answers. `JevProvider` implements the official `POST /v1/systemone` protocol, validates the schema and verifies that each selection belongs to the criteria, checks distributions, and handles timeouts/retries. The transport knows only about the TypeSafe API.
 - `DecisionEngine` classifies steps in batches of up to eight, chooses literals, and resolves elements. It uses `unsupported`/`none` options and never falls back to generation. It records the redacted request and response, making it possible to audit alternatives and calibrate the policy against your own cases.
-- `PlatformAdapter` opens the platform, observes candidates, executes actions, and produces evidence. `BrowserAdapter` is the first implementation. The candidate/locator contract retains DOM terminology in this proof of concept; extending it to mobile would require versioning or generalizing that contract.
+- `PlatformAdapter` opens the platform, observes candidates for an optional step, executes actions, and produces evidence. It may expose `diagnostics()` with connection configuration and network events. `BrowserAdapter` is the first implementation. The candidate/locator contract retains DOM terminology in this proof of concept; extending it to mobile would require versioning or generalizing that contract.
 - `runCase` controls ordering, the overall budget, cancellation, variable resolution, resource cleanup, and results. It does not use the model to determine success. The API accepts a per-step callback and injected providers/adapters.
 - `saveArtifacts` persists JSON, HTML, JUnit, and replay. New directories prevent old evidence from being mistaken for a recent failure. Replay uses the same adapter and assertions.
 
@@ -26,7 +26,9 @@ Each run opens an isolated context. The starting point is `baseUrl`; explicit na
 
 Locators are resolved again when an action runs. Playwright requires uniqueness and actionability; a snapshot does not guarantee that a DOM changed between decision and action will retain the same identity. Structural CSS locators and frame indexes have explicit limitations. For critical applications, prefer stable test ids and validate identity in a purpose-built adapter.
 
-Actions with side effects are not retried. Assertions use auto-waiting. Target resolution currently takes one snapshot per step: there is no autonomous search, exploratory scrolling, or route recovery. Very large lists, controls not exposed in the DOM, and open-ended steps are blocked.
+Actions with side effects are not retried. Assertions use auto-waiting. Observation waits up to `navigationTimeoutMs` for at least one compatible candidate, tolerating rendering after DOMContentLoaded and navigation context transitions. Once controls are available, target resolution uses a snapshot for one decision: there is no autonomous search, exploratory scrolling, or route recovery. Very large lists, controls not exposed in the DOM, and open-ended steps are blocked.
+
+Document navigation and control readiness use a separate timeout from actions/assertions. The browser inherits standard HTTP(S) proxy variables and NO_PROXY; explicit options override them. Reports retain up to 100 network/HTTP failure events, stripping proxy credentials, query strings, and fragments. Subresource HTTP 4xx/5xx responses are diagnostic evidence rather than automatic failures: a profile 401 before authentication is normal on MuleSoft. HTTP 4xx/5xx responses to explicit document navigation do block the run.
 
 ## Variables and reproducibility
 

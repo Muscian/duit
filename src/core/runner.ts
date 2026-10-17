@@ -11,6 +11,7 @@ import {
 import { saveArtifacts, type ReplayPlan } from "./artifacts.js";
 import {
   HarnessError,
+  pageOperations,
   type CaseSpec,
   type DecisionProvider,
   type PlatformAdapter,
@@ -124,7 +125,9 @@ export async function runCase(
           ? (step as ResolvedAction)
           : await engine!.resolve(
               step,
-              await options.platform.observe(),
+              pageOperations.has(step.operation)
+                ? undefined
+                : await options.platform.observe(step),
               signal,
             );
         signal.throwIfAborted();
@@ -192,6 +195,15 @@ export async function runCase(
           : String(error),
     );
   } finally {
+    if (report.error && !signal.aborted && options.screenshots !== false) {
+      try {
+        await options.platform.capture(join(artifactsDir, "startup.png"));
+        report.screenshot = "startup.png";
+      } catch {
+        report.warnings.push("Startup screenshot unavailable");
+      }
+    }
+    report.diagnostics = options.platform.diagnostics?.();
     signal.removeEventListener("abort", abort);
     try {
       await close();

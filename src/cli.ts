@@ -10,7 +10,7 @@ import { parseReplay } from "./core/replay.js";
 import { JevProvider } from "./providers/jev.js";
 import { BrowserAdapter, type BrowserOptions } from "./platforms/browser.js";
 
-const help = `duit — natural-language UI tests powered only by Jev\n\n  npm run duit -- run case.yaml [options]\n  npm run duit -- run steps.txt --base-url http://localhost:4173\n  npm run duit -- replay artifacts/<run>/replay.json [options]\n\nOptions:\n  --base-url URL         Override starting URL (required for .txt/.md)\n  --out DIRECTORY       New artifact directory (must not already exist)\n  --browser NAME        chromium (default), firefox, webkit\n  --proxy URL           Browser HTTP proxy (or DUIT_BROWSER_PROXY)\n  --headed              Show the browser\n  --timeout MS          Playwright action/assertion timeout (default 5000)\n  --budget MS           Whole-run deadline (default 300000)\n  --min-probability N    Decision threshold 0..1 (default 0.70)\n  --allow-origin URL    Allow additional navigation origin; repeatable\n  --storage-state FILE  Playwright authentication state\n  --trace               Record an unredacted Playwright trace (opt in)\n  --no-screenshots       Disable masked screenshots\n\nExit codes: 0 passed, 1 assertion/action failed, 2 blocked/configuration error.\n`;
+const help = `duit — natural-language UI tests powered only by Jev\n\n  npm run duit -- run case.yaml [options]\n  npm run duit -- run steps.txt --base-url http://localhost:4173\n  npm run duit -- replay artifacts/<run>/replay.json [options]\n\nOptions:\n  --base-url URL         Override starting URL (required for .txt/.md)\n  --out DIRECTORY       New artifact directory (must not already exist)\n  --browser NAME        chromium (default), firefox, webkit\n  --proxy URL           Override browser proxy; default inherits HTTP(S)_PROXY. Use "direct" to opt out\n  --headed              Show the browser\n  --timeout MS          Playwright action/assertion timeout (default 5000)\n  --navigation-timeout MS  Document and SPA readiness timeout (default 30000)\n  --budget MS           Whole-run deadline (default 300000)\n  --min-probability N    Decision threshold 0..1 (default 0.70)\n  --allow-origin URL    Allow additional navigation origin; repeatable\n  --storage-state FILE  Playwright authentication state\n  --trace               Record an unredacted Playwright trace (opt in)\n  --no-screenshots       Disable masked screenshots\n\nExit codes: 0 passed, 1 assertion/action failed, 2 blocked/configuration error.\n`;
 async function main() {
   const { values: v, positionals: p } = parseArgs({
     allowPositionals: true,
@@ -23,6 +23,7 @@ async function main() {
       headed: { type: "boolean" },
       timeout: { type: "string" },
       budget: { type: "string" },
+      "navigation-timeout": { type: "string" },
       "min-probability": { type: "string" },
       "allow-origin": { type: "string", multiple: true },
       "storage-state": { type: "string" },
@@ -74,6 +75,7 @@ async function main() {
     headed: v.headed,
     proxy: v.proxy,
     timeoutMs: numeric(v.timeout, 5000),
+    navigationTimeoutMs: numeric(v["navigation-timeout"], 30000),
     allowedOrigins: v["allow-origin"],
     storageState: v["storage-state"],
     tracePath: v.trace ? join(out, "trace.zip") : undefined,

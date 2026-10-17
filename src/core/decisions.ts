@@ -151,10 +151,15 @@ export class DecisionEngine {
   }
   async resolve(
     step: CompiledStep,
-    observation: Observation,
+    observation?: Observation,
     signal?: AbortSignal,
   ): Promise<ResolvedAction> {
     if (pageOperations.has(step.operation)) return { ...step };
+    if (!observation)
+      throw new HarnessError(
+        "MISSING_OBSERVATION",
+        "Target resolution requires a platform observation",
+      );
     const elements = observation.elements.filter((e) =>
       compatible(step.operation, e),
     );
@@ -217,7 +222,7 @@ export class DecisionEngine {
     return { ...step, target: target.locator };
   }
 }
-function compatible(op: Operation, el: ElementCandidate): boolean {
+export function compatible(op: Operation, el: ElementCandidate): boolean {
   if (op !== "assert_hidden" && !el.visible) return false;
   if (["fill", "assert_value"].includes(op))
     return (

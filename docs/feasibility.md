@@ -38,8 +38,9 @@ JSON reports include the version returned by the API, token usage, probabilities
 
 - `npm run check`: library, CLI, tests, and example types.
 - `npm run build`: ESM distribution and TypeScript declarations.
-- `npm test`: **16 tests passed**, including real Chromium execution; the live suite is intentionally skipped here.
+- `npm test`: **21 tests passed**, including real Chromium execution; the live suite is intentionally skipped here.
 - `npm run test:live`: **4 scenarios against real Jev** in one integration test; three positive cases and one expected failure.
+- `npm run test:mulesoft`: real login with a fresh context, inherited proxy, and six passing steps; see [MuleSoft](mulesoft.md) for diagnosis and results.
 - Protocol: rejects invented choices, invalid distributions, missing responses, low confidence, unsupported operations, and invalid replay plans.
 - Transport: checks bounded retries for 429, no retries for 401, and cancellation without exposing error bodies or credentials.
 - Browser: forms, selection, checks, enabled/disabled state, async assertions, screenshots, open shadow DOM, and iframes.

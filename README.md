@@ -34,11 +34,23 @@ For an external demo UI:
 ```bash
 export SAUCE_PASSWORD='secret_sauce' # Public SauceDemo credential
 npm run duit -- run examples/saucedemo.en.yaml --timeout 15000
-# If Chromium needs a proxy in your environment:
+# Chromium inherits HTTPS_PROXY; use --proxy to override it:
 npm run duit -- run examples/saucedemo.en.yaml --proxy "$HTTPS_PROXY" --timeout 15000
 ```
 
 `npm run duit -- --help` lists all options. `npm run build` compiles the library so you can use `node dist/cli.js` without tsx.
+
+## Real MuleSoft login
+
+`examples/mulesoft-login.en.yaml` starts a fresh session, enters Username/Password, and verifies **Management Center** and **API Manager** on the authenticated dashboard.
+
+Set `MULESOFT_USERNAME` and `MULESOFT_PASSWORD` in the repository `.env` (or export them), then run:
+
+```bash
+npm run duit -- run examples/mulesoft-login.en.yaml --timeout 30000 --navigation-timeout 60000
+```
+
+`--proxy` is unnecessary when `HTTPS_PROXY` is already configured. This flow uses real Jev and browser actions, with no pre-authenticated session. See [docs/mulesoft.md](docs/mulesoft.md) for the reproduced failure, fixes, and results.
 
 ## Writing your own cases
 
@@ -99,22 +111,23 @@ Exit codes: `0` passed, `1` action/assertion failed, `2` blocked/configuration e
 
 ## Configuration
 
-| Setting                          | Default                                                         |
-| -------------------------------- | --------------------------------------------------------------- |
+| Setting                          | Default                                                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `JEV_API_KEY`                    | Required only in live mode. Read from the environment, or from `.env` at the repository root when unset |
-| `JEV_MODEL`                      | `jev-1.14.0`, pinned version                                    |
-| `JEV_ENDPOINT`                   | `https://api.typesafe.ai/v1/systemone`                          |
-| `DUIT_BROWSER_PROXY` / `--proxy` | Direct browser connection                                       |
-| `--browser`                      | `chromium`; also `firefox`, `webkit` if installed               |
-| `--timeout`                      | 5000 ms per action/assertion                                    |
-| `--budget`                       | 300000 ms per run                                               |
-| `--min-probability`              | 0.70                                                            |
-| API policy                       | Minimum margin 0.20 and minimum confidence 0.40                 |
-| `--allow-origin`                 | Only the `baseUrl` origin; repeat for SSO/iframes               |
-| `--storage-state`                | New context by default; optional authenticated Playwright state |
-| `--no-screenshots`               | Disable screenshots                                             |
+| `JEV_MODEL`                      | `jev-1.14.0`, pinned version                                                                            |
+| `JEV_ENDPOINT`                   | `https://api.typesafe.ai/v1/systemone`                                                                  |
+| `DUIT_BROWSER_PROXY` / `--proxy` | Inherits HTTP(S)_PROXY / ALL_PROXY; respects NO_PROXY                                                   |
+| `--browser`                      | `chromium`; also `firefox`, `webkit` if installed                                                       |
+| `--navigation-timeout`           | 30000 ms for document navigation and SPA controls                                                       |
+| `--timeout`                      | 5000 ms per action/assertion                                                                            |
+| `--budget`                       | 300000 ms per run                                                                                       |
+| `--min-probability`              | 0.70                                                                                                    |
+| API policy                       | Minimum margin 0.20 and minimum confidence 0.40                                                         |
+| `--allow-origin`                 | Only the `baseUrl` origin; repeat for SSO/iframes                                                       |
+| `--storage-state`                | New context by default; optional authenticated Playwright state                                         |
+| `--no-screenshots`               | Disable screenshots                                                                                     |
 
-The Jev API respects `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and Node's CA trust. Configure the browser proxy separately. TLS is not disabled. Only transient transport/HTTP errors are retried, within a budget and with backoff; clicks and form submissions are never retried.
+The Jev API respects `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and Node's CA trust. The browser also inherits the environment proxy. `--proxy` takes precedence over `DUIT_BROWSER_PROXY`, which overrides standard proxy variables. Use `--proxy direct` for an explicit direct connection. Reports include the effective connection configuration and network errors. TLS is not disabled. Only transient transport/HTTP errors are retried, within a budget and with backoff; clicks and form submissions are never retried.
 
 ## Architecture and extension
 
@@ -166,13 +179,14 @@ npm run check      # Library, CLI, examples, and test types
 npm run build
 npm test           # Local tests + real Chromium; no model API
 npm run test:live  # Real API, requires JEV_API_KEY and consumes tokens
+npm run test:mulesoft # Opt-in real login; also requires MULESOFT_USERNAME/PASSWORD
 ```
 
 The live suite starts and stops its own local shop; `npm run demo` is not required. It checks positive cases and one false assertion. It uses no mock fallback. CI runs offline tests; live tests are started manually with a repository secret. Measured results and limitations: [docs/feasibility.md](docs/feasibility.md).
 
 ## Scope and data
 
-This proof of concept supports conventional DOM flows with atomic steps and explicit data. It includes present iframes with stable order and open shadow DOM. It does not cover canvas, closed shadow DOM, file uploads, drag-and-drop, captchas, interactive MFA, popups/multiple tabs, extracting unknown values for later steps, or open-ended goals that require planning. Initial observation does not implement an autonomous search/repair loop; a control that does not yet exist can result in `blocked`. The adapter approximates accessible names and should be evaluated against each UI.
+This proof of concept supports conventional DOM flows with atomic steps and explicit data. It includes present iframes with stable order and open shadow DOM. It does not cover canvas, closed shadow DOM, file uploads, drag-and-drop, captchas, interactive MFA, popups/multiple tabs, extracting unknown values for later steps, or open-ended goals that require planning. Initial observation does not implement an autonomous search/repair loop; before selecting a target, it waits up to `--navigation-timeout` for compatible controls to appear. This handles delayed SPA forms, but does not search for a specific control when other candidates already exist. The timeout produces `PAGE_NOT_READY`. The adapter approximates accessible names and should be evaluated against each UI.
 
 The model receives steps and descriptions of DOM candidates. It does not receive screenshots or input values from the extractor. Variables are resolved locally and their values are redacted from requests and reports; use `${VARIABLE}` for sensitive data. Values written literally in steps and other page content may be persisted or sent. Opt-in traces are **not redacted** and may contain DOM, network data, and secrets. Masked screenshots are not a general guarantee that PII has been removed. Store artifacts according to your project's data policy.
 

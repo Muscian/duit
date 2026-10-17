@@ -24,16 +24,19 @@
     "duit": "tsx src/cli.ts",
     "demo": "tsx examples/shop/server.ts",
     "format": "prettier --write src tests examples docs README.md *.json .github/workflows/*.yml",
-    "format:check": "prettier --check src tests examples docs README.md *.json .github/workflows/*.yml"
+    "format:check": "prettier --check src tests examples docs README.md *.json .github/workflows/*.yml",
+    "test:mulesoft": "DUIT_MULESOFT_LIVE=1 tsx --test tests/mulesoft.test.ts"
   },
   "dependencies": {
     "@playwright/test": "^1.56.0",
+    "proxy-from-env": "^2.1.0",
     "undici": "^7.16.0",
     "yaml": "^2.8.1",
     "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/node": "^24.9.0",
+    "@types/proxy-from-env": "^1.0.4",
     "prettier": "^3.9.10",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"

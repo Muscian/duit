@@ -13,11 +13,16 @@ import {
 import {
   HarnessError,
   type ElementCandidate,
+  type CompiledStep,
+  type PlatformDiagnostics,
   type LocatorSpec,
   type Observation,
   type PlatformAdapter,
   type ResolvedAction,
 } from "../core/types.js";
+
+import { browserConnection, diagnosticUrl } from "./browser-network.js";
+import { compatible } from "../core/decisions.js";
 
 type DomCandidate = Omit<ElementCandidate, "id" | "locator"> & {
   css: string;
@@ -29,6 +34,7 @@ export type BrowserOptions = {
   browser?: "chromium" | "firefox" | "webkit";
   headed?: boolean;
   timeoutMs?: number;
+  navigationTimeoutMs?: number;
   allowedOrigins?: string[];
   storageState?: string;
   tracePath?: string;
@@ -43,6 +49,21 @@ export class BrowserAdapter implements PlatformAdapter {
   private blockedNavigation?: string;
   private baseUrl = "";
   private disposed = false;
+  private diagnosticState: PlatformDiagnostics = { events: [] };
+  diagnostics(): PlatformDiagnostics {
+    return {
+      ...this.diagnosticState,
+      url: this.page
+        ? diagnosticUrl(this.page.url())
+        : this.diagnosticState.url,
+      events: [...this.diagnosticState.events],
+    };
+  }
+  private networkEvent(event: PlatformDiagnostics["events"][number]) {
+    this.diagnosticState.events.push(event);
+    if (this.diagnosticState.events.length > 100)
+      this.diagnosticState.events.shift();
+  }
   constructor(private options: BrowserOptions = {}) {}
   async open(url: string) {
     if (this.disposed)
@@ -55,17 +76,13 @@ export class BrowserAdapter implements PlatformAdapter {
       new URL(url).origin,
       ...(this.options.allowedOrigins ?? []).map((s) => new URL(s).origin),
     ]);
+    const { connection, proxy } = browserConnection(url, this.options.proxy);
+    this.diagnosticState = { url: diagnosticUrl(url), connection, events: [] };
     this.browser = await { chromium, firefox, webkit }[
       this.options.browser ?? "chromium"
     ].launch({
       headless: !this.options.headed,
-      proxy:
-        (this.options.proxy ?? process.env.DUIT_BROWSER_PROXY)
-          ? {
-              server: (this.options.proxy ?? process.env.DUIT_BROWSER_PROXY)!,
-              bypass: "localhost,127.0.0.1,[::1]",
-            }
-          : undefined,
+      proxy,
     });
     if (this.disposed) {
       await this.browser.close();
@@ -77,7 +94,24 @@ export class BrowserAdapter implements PlatformAdapter {
       serviceWorkers: "block",
     });
     this.context.setDefaultTimeout(this.options.timeoutMs ?? 5000);
-    this.context.setDefaultNavigationTimeout(this.options.timeoutMs ?? 5000);
+    this.context.setDefaultNavigationTimeout(
+      this.options.navigationTimeoutMs ?? 30_000,
+    );
+    this.context.on("requestfailed", (request) =>
+      this.networkEvent({
+        kind: "request_failed",
+        url: diagnosticUrl(request.url()),
+        message: request.failure()?.errorText,
+      }),
+    );
+    this.context.on("response", (response) => {
+      if (response.status() >= 400)
+        this.networkEvent({
+          kind: "http_error",
+          url: diagnosticUrl(response.url()),
+          status: response.status(),
+        });
+    });
     await this.context.route("**/*", async (route) => {
       const req = route.request();
       if (
@@ -85,6 +119,10 @@ export class BrowserAdapter implements PlatformAdapter {
         !this.origins.has(new URL(req.url()).origin)
       ) {
         this.blockedNavigation = new URL(req.url()).origin;
+        this.networkEvent({
+          kind: "navigation_blocked",
+          url: diagnosticUrl(req.url()),
+        });
         await route.abort("blockedbyclient");
       } else await route.continue();
     });
@@ -95,7 +133,7 @@ export class BrowserAdapter implements PlatformAdapter {
         sources: false,
       });
     this.page = await this.context.newPage();
-    await this.page.goto(url, { waitUntil: "domcontentloaded" });
+    await this.navigate(url);
   }
   private current(): Page {
     if (!this.page)
@@ -112,7 +150,68 @@ export class BrowserAdapter implements PlatformAdapter {
       );
     return this.page;
   }
-  async observe(): Promise<Observation> {
+  private async navigate(url: string) {
+    try {
+      const response = await this.current().goto(url, {
+        waitUntil: "domcontentloaded",
+      });
+      if (response && response.status() >= 400)
+        throw new HarnessError(
+          "HTTP_NAVIGATION_ERROR",
+          `HTTP ${response.status()} loading ${diagnosticUrl(url)}; inspect report network diagnostics`,
+        );
+    } catch (error) {
+      if (this.blockedNavigation) this.current();
+      if (error instanceof HarnessError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof Error && error.name === "TimeoutError")
+        throw new HarnessError(
+          "NAVIGATION_TIMEOUT",
+          `Loading ${diagnosticUrl(url)} exceeded the navigation timeout; check proxy/network and --navigation-timeout`,
+        );
+      const code = message.match(/net::[A-Z_]+/)?.[0] ?? "navigation failed";
+      throw new HarnessError(
+        "BROWSER_CONNECTION_FAILED",
+        `${code} loading ${diagnosticUrl(url)}; check HTTP(S)_PROXY, NO_PROXY or --proxy. See report network diagnostics.`,
+      );
+    }
+  }
+  async observe(step?: CompiledStep): Promise<Observation> {
+    if (!step) return this.snapshot();
+    const page = this.current();
+    const deadline = Date.now() + (this.options.navigationTimeoutMs ?? 30_000);
+    // DOMContentLoaded does not mean that a SPA has rendered its form.
+    // Poll only observations; decisions and UI actions are never retried here.
+    do {
+      this.current();
+      try {
+        const observation = await this.snapshot();
+        if (
+          observation.elements.some((element) =>
+            compatible(step.operation, element),
+          )
+        )
+          return observation;
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !/Execution context was destroyed|Cannot find context|Frame was detached/.test(
+            error.message,
+          )
+        )
+          throw error;
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      // Closing the browser on cancellation interrupts this short wait immediately.
+      await page.waitForTimeout(Math.min(250, remaining));
+    } while (Date.now() < deadline);
+    throw new HarnessError(
+      "PAGE_NOT_READY",
+      `No eligible controls appeared for ${step.operation} at ${diagnosticUrl(page.url())}; inspect network diagnostics or increase --navigation-timeout`,
+    );
+  }
+  private async snapshot(): Promise<Observation> {
     const page = this.current();
     const elements: ElementCandidate[] = [];
     const frames = page.frames();
@@ -218,7 +317,7 @@ export class BrowserAdapter implements PlatformAdapter {
           "NAVIGATION_BLOCKED",
           "URL is outside allowed origins",
         );
-      await page.goto(url.href, { waitUntil: "domcontentloaded" });
+      await this.navigate(url.href);
     } else if (op === "assert_url") {
       await expect(page).toHaveURL(new URL(value, this.baseUrl).href, {
         timeout,
@@ -328,6 +427,7 @@ export class BrowserAdapter implements PlatformAdapter {
   }
   async close(): Promise<void> {
     this.disposed = true;
+    if (this.page) this.diagnosticState.url = diagnosticUrl(this.page.url());
     try {
       if (this.context && this.options.tracePath)
         await this.context.tracing.stop({ path: this.options.tracePath });

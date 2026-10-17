@@ -91,12 +91,23 @@ export type CompiledStep = {
   value?: string;
 };
 export type ResolvedAction = CompiledStep & { target?: LocatorSpec };
+export type PlatformDiagnostics = {
+  url?: string;
+  connection?: { mode: "direct" | "proxy"; source: string; proxy?: string };
+  events: Array<{
+    kind: "request_failed" | "http_error" | "navigation_blocked";
+    url: string;
+    status?: number;
+    message?: string;
+  }>;
+};
 export interface PlatformAdapter {
   open(url: string): Promise<void>;
-  observe(): Promise<Observation>;
+  observe(step?: CompiledStep): Promise<Observation>;
   execute(action: ResolvedAction): Promise<void>;
   capture(path: string): Promise<void>;
   close(): Promise<void>;
+  diagnostics?(): PlatformDiagnostics;
 }
 export type CaseSpec = {
   name: string;
@@ -130,6 +141,8 @@ export type RunReport = {
   decisions: DecisionEvent[];
   error?: string;
   warnings: string[];
+  diagnostics?: PlatformDiagnostics;
+  screenshot?: string;
   artifactsDir: string;
 };
 export class HarnessError extends Error {

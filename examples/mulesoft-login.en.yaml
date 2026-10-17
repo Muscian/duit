@@ -1,0 +1,12 @@
+name: MuleSoft Anypoint Platform sign in
+baseUrl: https://test1.platform.mulesoft.com/login/signin?
+variables:
+  USERNAME: env:MULESOFT_USERNAME
+  PASSWORD: env:MULESOFT_PASSWORD
+steps:
+  - 'Enter "${USERNAME}" in Username'
+  - 'Enter "${PASSWORD}" in Password'
+  - "Click the Sign in button"
+  - 'Verify the text "Management Center" is visible'
+  - 'Verify the text "API Manager" is visible'
+  - 'Verify the text "Sign in" is not visible'
