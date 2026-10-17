@@ -1,4 +1,5 @@
 import "../load-env.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   chromium,
   firefox,
@@ -51,6 +52,64 @@ export class BrowserAdapter implements PlatformAdapter {
   private origins = new Set<string>();
   private blockedNavigation?: string;
   private baseUrl = "";
+  private popupTasks: Promise<void>[] = [];
+  private opening = true;
+  private interruptionHandler?: () => Promise<void>;
+  private handlerContext = new AsyncLocalStorage<boolean>();
+  private activeAction?: {
+    settled: boolean;
+    error?: unknown;
+    done: Promise<void>;
+    release: () => void;
+  };
+  private async withActionFence(action: () => Promise<void>) {
+    if (this.handlerContext.getStore()) return action();
+    let release!: () => void;
+    const state = {
+      settled: false,
+      error: undefined as unknown,
+      done: new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+      release: () => release(),
+    };
+    this.activeAction = state;
+    try {
+      await action();
+    } catch (error) {
+      throw state.error ?? error;
+    } finally {
+      state.settled = true;
+      state.release();
+      if (this.activeAction === state) this.activeAction = undefined;
+    }
+  }
+  setInterruptionHandler(handler: () => Promise<void>) {
+    this.interruptionHandler = handler;
+  }
+  private async attachInterruptionHandler(page: Page) {
+    if (this.interruptionHandler)
+      await page.addLocatorHandler(
+        page.locator("body"),
+        async () => {
+          const action = this.activeAction;
+          try {
+            await this.handlerContext.run(true, async () =>
+              this.interruptionHandler?.(),
+            );
+          } catch (error) {
+            // Playwright invokes handlers as async events: throwing here escapes
+            // the pending action. Hold its gate until that action times out, then
+            // propagate the original error through the ordinary runner boundary.
+            if (action && !action.settled) {
+              action.error = error;
+              await action.done;
+            }
+          }
+        },
+        { noWaitAfter: true },
+      );
+  }
   private disposed = false;
   private diagnosticState: PlatformDiagnostics = { events: [] };
   private network = new BrowserNetworkDiagnostics((event) =>
@@ -173,34 +232,83 @@ export class BrowserAdapter implements PlatformAdapter {
       (this.options.browser ?? "chromium") === "chromium",
     );
     await this.navigate(url);
+    await this.attachInterruptionHandler(this.page);
+    this.opening = false;
+    this.context.on("page", (popup) => {
+      if (this.opening) return;
+      const task = (async () => {
+        await this.network.attachPage(
+          popup,
+          (this.options.browser ?? "chromium") === "chromium",
+        );
+        await popup.waitForURL(
+          (value) => value.protocol === "https:" || value.protocol === "http:",
+          { timeout: this.options.navigationTimeoutMs ?? 30000 },
+        );
+        if (!this.origins.has(new URL(popup.url()).origin))
+          throw new HarnessError(
+            "NAVIGATION_BLOCKED",
+            "New window is outside allowed origins",
+          );
+        await popup.waitForLoadState("domcontentloaded");
+        await this.attachInterruptionHandler(popup);
+        this.page = popup;
+      })();
+      // Retain rejection for the next operation without an unhandled rejection.
+      void task.catch(() => {});
+      this.popupTasks.push(task);
+    });
   }
   private current(): Page {
     if (!this.page)
       throw new HarnessError("BROWSER_CLOSED", "Browser is not open");
-    if (this.blockedNavigation)
-      throw new HarnessError(
-        "NAVIGATION_BLOCKED",
-        `Navigation to ${this.blockedNavigation} is outside allowed origins`,
-      );
-    if (this.context!.pages().length !== 1)
-      throw new HarnessError(
-        "MULTIPLE_PAGES",
-        "Popups/new tabs are not supported in this PoC",
-      );
     return this.page;
   }
-  private async navigate(url: string) {
+  async refresh(controlName?: string) {
+    if (!controlName) {
+      await this.navigate(this.current().url(), true);
+      return;
+    }
+    const observation = await this.observe();
+    const matches = observation.elements.filter(
+      (element) =>
+        element.role === "button" &&
+        element.name === controlName &&
+        element.visible &&
+        !element.blockedByModal &&
+        !element.disabled,
+    );
+    if (matches.length !== 1)
+      throw new HarnessError(
+        "REFRESH_CONTROL_UNAVAILABLE",
+        `Expected one visible refresh button named ${JSON.stringify(controlName)}, found ${matches.length}`,
+      );
+    const action: ResolvedAction = {
+      text: `Refresh using ${controlName}`,
+      operation: "click",
+      target: matches[0].locator,
+      resolution: "exact-label",
+    };
+    await this.prepare(action);
+    await this.execute(action);
+  }
+  private async navigate(url: string, reload = false) {
+    this.blockedNavigation = undefined;
     try {
-      const response = await this.current().goto(url, {
-        waitUntil: "domcontentloaded",
-      });
+      const response = reload
+        ? await this.current().reload({ waitUntil: "domcontentloaded" })
+        : await this.current().goto(url, { waitUntil: "domcontentloaded" });
       if (response && response.status() >= 400)
         throw new HarnessError(
           "HTTP_NAVIGATION_ERROR",
           `HTTP ${response.status()} loading ${diagnosticUrl(url)}; inspect report network diagnostics`,
         );
     } catch (error) {
-      if (this.blockedNavigation) this.current();
+      if (this.blockedNavigation)
+        throw new HarnessError(
+          "NAVIGATION_BLOCKED",
+          `Navigation to ${this.blockedNavigation} is outside allowed origins`,
+        );
       if (error instanceof HarnessError) throw error;
       const message = error instanceof Error ? error.message : String(error);
       if (error instanceof Error && error.name === "TimeoutError")
@@ -215,8 +323,28 @@ export class BrowserAdapter implements PlatformAdapter {
       );
     }
   }
+  private async settlePopups() {
+    while (this.popupTasks.length) {
+      try {
+        await this.popupTasks.shift();
+      } catch (error) {
+        if (this.blockedNavigation)
+          throw new HarnessError(
+            "NAVIGATION_BLOCKED",
+            `Navigation to ${this.blockedNavigation} is outside allowed origins; add it to allowedOrigins before the next run`,
+          );
+        throw error;
+      }
+    }
+  }
   async observe(step?: CompiledStep): Promise<Observation> {
-    if (!step) return this.snapshot();
+    await this.settlePopups();
+    if (!step) {
+      const observation = await this.snapshot();
+      const resourceError = await this.network.blankPageError();
+      if (resourceError) throw resourceError;
+      return observation;
+    }
     const page = this.current();
     const deadline = Date.now() + (this.options.navigationTimeoutMs ?? 30_000);
     // DOMContentLoaded does not mean that a SPA has rendered its form.
@@ -261,7 +389,7 @@ export class BrowserAdapter implements PlatformAdapter {
       // Neither the user nor the model can provide executable JavaScript.
       const candidates = await frame
         .locator(
-          'input,textarea,select,button,a[href],summary,[role],[contenteditable="true"],h1,h2,h3,h4,label,p,li,td,[data-testid]',
+          'input,textarea,select,button,a,summary,[role],[tabindex],[onclick],[contenteditable="true"],h1,h2,h3,h4,label,p,li,td,[data-testid],div,span',
         )
         .evaluateAll(
           new Function(
@@ -276,57 +404,116 @@ export class BrowserAdapter implements PlatformAdapter {
           const siblings = Array.from(parent.children).filter(n => n.localName === tag);
           return selector(parent) + ' > ' + tag + (siblings.length > 1 ? ':nth-of-type(' + (siblings.indexOf(el)+1) + ')' : '');
         };
-        return nodes.map(el => {
+        const semantic = 'input,textarea,select,button,a,summary,[role],[tabindex],[onclick],[contenteditable="true"],h1,h2,h3,h4,label,p,li,td,[data-testid]';
+        const parentOf = (el) => el.parentElement || (el.getRootNode() instanceof ShadowRoot ? el.getRootNode().host : null);
+        const ancestors = (el) => { const result=[]; for(let p=parentOf(el);p;p=parentOf(p)) result.push(p); return result; };
+        return nodes.filter(el => el.matches(semantic) || (getComputedStyle(el).cursor === 'pointer' && !el.querySelector('button,a,[role="button"],[role="link"],div,span') && !ancestors(el).some(p=>p.matches('button,a,[role="button"],[role="link"],[tabindex],[onclick]')) && (el.textContent || '').trim().length > 0 && (el.textContent || '').trim().length < 200)).map(el => {
           const node = el;
           const input = el;
           const tag = el.localName;
           const type = el.getAttribute('type') ?? '';
           const label = Array.from(input.labels ?? []).map(n => n.textContent?.trim()).join(' ');
-          const labelled = (el.getAttribute('aria-labelledby') ?? '').split(/\s+/).map(id => el.ownerDocument.getElementById(id)?.textContent ?? '').join(' ').trim();
+          const labelled = (el.getAttribute('aria-labelledby') ?? '').split(/\s+/).map(id => (el.getRootNode().getElementById?.(id) || el.ownerDocument.getElementById(id))?.textContent ?? '').join(' ').trim();
           const text = (node.innerText ?? el.textContent ?? '').trim().replace(/\s+/g,' ').slice(0,300);
-          const name = (el.getAttribute('aria-label') || labelled || label || el.getAttribute('alt') || el.getAttribute('placeholder') || (['submit','button','reset'].includes(type) ? input.value : '') || (['input','textarea','select'].includes(tag) ? '' : text)).slice(0,300);
-          const role = el.getAttribute('role') || ({ button:'button', a:'link', select:'combobox', textarea:'textbox', summary:'button', h1:'heading',h2:'heading',h3:'heading',h4:'heading',li:'listitem' }[tag] ?? (tag === 'input' ? (['checkbox','radio'].includes(type) ? type : ['submit','button','reset'].includes(type) ? 'button' : 'textbox') : ''));
+          const name = (el.getAttribute('aria-label') || labelled || label || el.getAttribute('title') || el.getAttribute('alt') || el.getAttribute('placeholder') || (['submit','button','reset'].includes(type) ? input.value : '') || (['input','textarea','select'].includes(tag) ? '' : text)).slice(0,300);
+          const role = el.getAttribute('role') || ({ button:'button', a:'link', select:'combobox', textarea:'textbox', summary:'button', h1:'heading',h2:'heading',h3:'heading',h4:'heading',li:'listitem' }[tag] ?? (tag === 'input' ? (['checkbox','radio'].includes(type) ? type : ['submit','button','reset'].includes(type) ? 'button' : 'textbox') : ((el.hasAttribute('onclick') || el.tabIndex >= 0 || getComputedStyle(el).cursor === 'pointer') && !ancestors(el).some(p=>p.matches('button,a,[role="button"],[role="link"],[tabindex],[onclick]'))) ? 'button' : ''));
           const rect = el.getBoundingClientRect();
           const style = getComputedStyle(el);
-          const visible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-          const container = el.closest('tr,li,fieldset,article,section,form') || el.parentElement?.parentElement || el.parentElement;
+          const parents = ancestors(el);
+          const visible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && ![el,...parents].some(n => n.hasAttribute('inert') || n.getAttribute('aria-hidden') === 'true');
+          const x=Math.max(0,Math.min(innerWidth-1,rect.x+rect.width/2)), y=Math.max(0,Math.min(innerHeight-1,rect.y+rect.height/2));
+          const inViewport=rect.right>0 && rect.bottom>0 && rect.left<innerWidth && rect.top<innerHeight;
+          let hit = document.elementFromPoint(x,y);
+          while(hit?.shadowRoot?.elementFromPoint(x,y) && hit.shadowRoot.elementFromPoint(x,y)!==hit) hit=hit.shadowRoot.elementFromPoint(x,y);
+          const occluded = visible && inViewport && !!hit && hit !== el && !el.contains(hit) && !ancestors(hit).includes(el);
+          const overlayNode=[el,...parents].find(n=>n.matches('dialog,[role="dialog"],[aria-modal="true"]'));
+          const overlay=overlayNode ? (overlayNode.getAttribute('aria-label') || overlayNode.querySelector('h1,h2,h3,[role="heading"]')?.textContent || overlayNode.innerText || '').trim().replace(/\s+/g,' ').slice(0,300) : undefined;
+          const container = el.closest('tr,[role="row"],fieldset,article,[role="group"],button,[role="button"]') || el.parentElement?.parentElement || el.parentElement;
+          const headings=parents.slice(0,8).flatMap(p=>Array.from(p.children).filter(n=>!n.contains(el) && (n.matches('h1,h2,h3,h4,legend,label') || (n.matches('div,span') && !n.querySelector('input,textarea,select,button,a,[role=button]') && (n.innerText??'').trim().length<160))).map(n=>(n.innerText??n.textContent??'').trim())).filter(Boolean);
+          let fieldGroup;
+          if(['input','textarea','select'].includes(tag)) {
+            let count;
+            for(const p of parents) {
+              const n=p.querySelectorAll('input,textarea,select').length;
+              if(n>1 && count===undefined)count=n;
+              if(count!==undefined && n!==count)break;
+              if(n===count && !p.matches('body,html') && (p.innerText??'').length<1400)fieldGroup=p;
+            }
+          }
+          const row=el.closest('tr,[role="row"]');
+          const rowContext=row?.parentElement ? 'Row '+(Array.from(row.parentElement.children).filter(n=>n.matches('tr,[role="row"]')).indexOf(row)+1)+': '+(row.innerText??'').trim().replace(/\s+/g,' ') : undefined;
+          const context=[...new Set([...(rowContext?[rowContext]:[]),...headings,...(fieldGroup?[(fieldGroup.innerText??'').trim().replace(/\s+/g,' ')]:[]),(container?.innerText ?? '').trim().replace(/\s+/g,' ')])].join(' | ').slice(0,1400);
           return { tag, role, name, text: ['input','textarea','select'].includes(tag) ? '' : text, type,
             disabled: el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true', visible,
-            checked: ['checkbox','radio'].includes(type) ? input.checked : undefined,
+            checked: ['checkbox','radio'].includes(type) ? input.checked : ['checkbox','radio','switch'].includes(role) ? el.getAttribute('aria-checked') === 'true' : undefined,
+            occluded, overlay, href: el.hasAttribute('href') ? el.href : undefined,
             options: tag === 'select' ? Array.from(el.options).map(o => o.label) : undefined,
-            context: (container?.innerText ?? '').trim().replace(/\s+/g,' ').slice(0,400),
+            context,
             css: selector(el), testId: el.getAttribute('data-testid'), label,
           };
         });
       `,
           ) as (nodes: Element[]) => DomCandidate[],
         );
-      for (const c of candidates) {
-        let spec: LocatorSpec = { frame: index, kind: "css", value: c.css };
-        if (c.testId && (await frame.getByTestId(c.testId).count()) === 1)
-          spec = { frame: index, kind: "testId", value: c.testId };
-        else if (
-          c.label &&
-          (await frame.getByLabel(c.label, { exact: true }).count()) === 1
-        )
-          spec = { frame: index, kind: "label", value: c.label };
-        else if (
-          c.role &&
-          c.name &&
-          (await frame
-            .getByRole(c.role as Parameters<Frame["getByRole"]>[0], {
-              name: c.name,
-              exact: true,
-            })
-            .count()) === 1
-        )
-          spec = { frame: index, kind: "role", value: c.role, name: c.name };
-        // Do not expose selectors/test data values to the model. Only the safe descriptive fields go to Jev.
-        const { css: _css, testId: _testId, label: _label, ...data } = c;
-        elements.push({ ...data, id: `e${elements.length}`, locator: spec });
-      }
+      const observed = await Promise.all(
+        candidates.map(async (c) => {
+          let spec: LocatorSpec = { frame: index, kind: "css", value: c.css };
+          if (c.testId && (await frame.getByTestId(c.testId).count()) === 1)
+            spec = { frame: index, kind: "testId", value: c.testId };
+          else if (
+            c.label &&
+            (await frame.getByLabel(c.label, { exact: true }).count()) === 1
+          )
+            spec = { frame: index, kind: "label", value: c.label };
+          else if (
+            c.role &&
+            c.name &&
+            (await frame
+              .getByRole(c.role as Parameters<Frame["getByRole"]>[0], {
+                name: c.name,
+                exact: true,
+              })
+              .count()) === 1
+          )
+            spec = { frame: index, kind: "role", value: c.role, name: c.name };
+          // Do not expose selectors/test data values to the model. Only the safe descriptive fields go to Jev.
+          const { css: _css, testId: _testId, label: _label, ...data } = c;
+          if (data.href) data.href = diagnosticUrl(data.href);
+          return { ...data, locator: spec };
+        }),
+      );
+      for (const element of observed)
+        elements.push({ ...element, id: `e${elements.length}` });
     }
-    return { url: page.url(), title: await page.title(), elements };
+    const activeOverlays = new Set(
+      elements
+        .filter(
+          (e) =>
+            e.visible &&
+            !e.occluded &&
+            e.overlay &&
+            ["button", "link"].includes(e.role),
+        )
+        .map((e) => e.overlay),
+    );
+    if (activeOverlays.size)
+      for (const element of elements)
+        if (!element.overlay) {
+          element.occluded = true;
+          element.blockedByModal = true;
+        }
+    const text = (await page.locator("body").innerText()).slice(0, 16000);
+    return {
+      url: page.url(),
+      title: await page.title(),
+      text,
+      dialogs: [
+        ...new Set(
+          elements.filter((e) => e.visible && e.overlay).map((e) => e.overlay!),
+        ),
+      ],
+      elements,
+    };
   }
   private locator(spec: LocatorSpec): Locator {
     const frame = this.current().frames()[spec.frame];
@@ -346,7 +533,32 @@ export class BrowserAdapter implements PlatformAdapter {
         return frame.locator(spec.value);
     }
   }
+  async prepare(action: ResolvedAction): Promise<void> {
+    return this.withActionFence(() => this.prepareAction(action));
+  }
+  private async prepareAction(action: ResolvedAction): Promise<void> {
+    await this.settlePopups();
+    if (!action.target || action.operation.startsWith("assert_")) return;
+    const target = this.locator(action.target);
+    try {
+      await expect(target).toHaveCount(1, {
+        timeout: this.options.timeoutMs ?? 5000,
+      });
+      await target.click({
+        trial: true,
+        timeout: this.options.timeoutMs ?? 5000,
+      });
+    } catch {
+      throw new HarnessError(
+        "UI_NOT_ACTIONABLE",
+        `The selected ${action.operation} control is not uniquely actionable. Inspect dialogs, visibility, disabled state and current page before retrying.`,
+      );
+    }
+  }
   async execute(action: ResolvedAction): Promise<void> {
+    return this.withActionFence(() => this.executeWithChecks(action));
+  }
+  private async executeWithChecks(action: ResolvedAction): Promise<void> {
     const textAssertion = ["assert_text", "assert_no_text"].includes(
       action.operation,
     );
@@ -355,7 +567,22 @@ export class BrowserAdapter implements PlatformAdapter {
         const error = await this.network.blankPageError();
         if (error) throw error;
       }
+      await this.settlePopups();
+      this.blockedNavigation = undefined;
+      const popup =
+        action.operation === "click"
+          ? this.current()
+              .waitForEvent("popup", { timeout: 250 })
+              .catch(() => undefined)
+          : undefined;
       await this.executeAction(action);
+      if (popup) await popup;
+      await this.settlePopups();
+      if (this.blockedNavigation)
+        throw new HarnessError(
+          "NAVIGATION_BLOCKED",
+          `Navigation to ${this.blockedNavigation} is outside allowed origins`,
+        );
     } catch (error) {
       if (textAssertion) {
         const resourceError = await this.network.blankPageError();

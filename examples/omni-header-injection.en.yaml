@@ -1,0 +1,86 @@
+# Authoring case: stops at review, before mutation. See docs/omni-header-injection.md.
+name: Omni open Header Injection — authoring to single-stage review
+baseUrl: https://test1.platform.mulesoft.com/login/signin
+browser:
+  allowedOrigins:
+    - https://test1.omni.mulesoft.com
+  localNetworkOrigins:
+    - https://test1.platform.mulesoft.com
+    - https://test1.omni.mulesoft.com
+  timeoutMs: 15000
+  navigationTimeoutMs: 30000
+variables:
+  USERNAME: env:MULESOFT_USERNAME
+  PASSWORD: env:MULESOFT_PASSWORD
+  API_NAME: env:OMNI_API_NAME
+  STAGE_ID: env:OMNI_STAGE_ID
+interruptions:
+  - name: Cookie consent
+    when:
+      text: We use cookies
+    action: Click ACCEPT ALL COOKIES
+    maxRuns: 2
+  - name: Email reminder
+    when:
+      text: Please confirm your email address
+    action: Click Not Now
+  - name: Agent Fabric welcome
+    when:
+      text: Welcome to Agent Fabric
+      urlIncludes: https://test1.omni.mulesoft.com/
+    action: Click Start exploring
+  - name: Guided tour
+    when:
+      text: Skip tour and close dialog
+      urlIncludes: https://test1.omni.mulesoft.com/
+    action: Click "Skip tour and close dialog"
+    maxRuns: 3
+steps:
+  - Enter "${USERNAME}" in Username
+  - Enter "${PASSWORD}" in Password
+  - Click Sign in
+  - Verify the text "Management Center" is visible
+  - Click Switch to enhanced
+  - instruction: Click the Governance Strategies navigation link
+    context:
+      urlIncludes: https://test1.omni.mulesoft.com/
+      text: Portfolio Overview
+  - instruction: Click Add Strategy
+    context:
+      urlIncludes: /governance-strategy
+  - instruction: Click Add Policy
+    aliases:
+      - Apply Policy
+  - instruction: Enter "Header Injection" in the policy search field
+    context:
+      text: Select the policy to apply using this strategy.
+  - instruction: Click the Select Header Injection button
+    scope: "Open: Works across all gateways"
+  - Click Next
+  - Click Add Inbound Header Injection
+  - Click Add Outbound Header Injection
+  - instruction: Enter "X-Backend-Source" in Key
+    scope: Inbound Header Injection
+  - instruction: Enter "duit-e2e" in Value
+    scope: Inbound Header Injection
+  - instruction: Enter "X-Served-By" in Key
+    scope: Outbound Header Injection
+  - instruction: Enter "duit-test1" in Value
+    scope: Outbound Header Injection
+  - instruction: Verify the Key input field has the exact value "X-Backend-Source"
+    scope: Inbound Header Injection
+  - instruction: Verify the Value input field has the exact value "duit-e2e"
+    scope: Inbound Header Injection
+  - instruction: Verify the Key input field has the exact value "X-Served-By"
+    scope: Outbound Header Injection
+  - instruction: Verify the Value input field has the exact value "duit-test1"
+    scope: Outbound Header Injection
+  - Click Next
+  - Click the "${API_NAME}" button
+  - Check the checkbox named "${STAGE_ID}"
+  - Click Next
+  - Verify the text "Applying Header Injection directly to 1 selected instance." is visible
+  - Verify the text "${STAGE_ID}" is visible
+publicVariables:
+  - API_NAME
+  - STAGE_ID

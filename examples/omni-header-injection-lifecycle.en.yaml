@@ -1,0 +1,173 @@
+# MUTATES the chosen stage and removes its header mapping. Use only a disposable stage.
+# Read docs/omni-header-injection.md before running.
+name: Omni open Header Injection — apply one stage and clean up
+baseUrl: https://test1.platform.mulesoft.com/login/signin
+browser:
+  allowedOrigins:
+    - https://test1.omni.mulesoft.com
+  localNetworkOrigins:
+    - https://test1.platform.mulesoft.com
+    - https://test1.omni.mulesoft.com
+  timeoutMs: 15000
+  navigationTimeoutMs: 30000
+variables:
+  USERNAME: env:MULESOFT_USERNAME
+  PASSWORD: env:MULESOFT_PASSWORD
+  API_NAME: env:OMNI_API_NAME
+  STAGE_ID: env:OMNI_STAGE_ID
+  INSTANCE_PATH: env:OMNI_INSTANCE_PATH
+interruptions:
+  - name: Cookie consent
+    when:
+      text: We use cookies
+    action: Click ACCEPT ALL COOKIES
+    maxRuns: 2
+  - name: Email reminder
+    when:
+      text: Please confirm your email address
+    action: Click Not Now
+  - name: Agent Fabric welcome
+    when:
+      text: Welcome to Agent Fabric
+      urlIncludes: https://test1.omni.mulesoft.com/
+    action: Click Start exploring
+  - name: Guided tour
+    when:
+      text: Skip tour and close dialog
+      urlIncludes: https://test1.omni.mulesoft.com/
+    action: Click "Skip tour and close dialog"
+    maxRuns: 3
+steps:
+  - Enter "${USERNAME}" in Username
+  - Enter "${PASSWORD}" in Password
+  - Click Sign in
+  - Verify the text "Management Center" is visible
+  - Click Switch to enhanced
+  - instruction: Navigate to "https://test1.omni.mulesoft.com${INSTANCE_PATH}"
+    context:
+      urlIncludes: https://test1.omni.mulesoft.com/
+      text: Portfolio Overview
+  - instruction: Verify the text "Header Mapping" is not visible
+    context:
+      urlIncludes: /instances/${STAGE_ID}
+      text: Instance Policies
+  - instruction: Click the Governance Strategies navigation link
+    context:
+      urlIncludes: https://test1.omni.mulesoft.com/
+  - instruction: Click Add Strategy
+    context:
+      urlIncludes: /governance-strategy
+  - instruction: Click Add Policy
+    aliases:
+      - Apply Policy
+  - instruction: Enter "Header Injection" in the policy search field
+    context:
+      text: Select the policy to apply using this strategy.
+  - instruction: Click the Select Header Injection button
+    scope: "Open: Works across all gateways"
+  - Click Next
+  - Click Add Inbound Header Injection
+  - Click Add Outbound Header Injection
+  - instruction: Enter "X-Backend-Source" in Key
+    scope: Inbound Header Injection
+  - instruction: Enter "duit-e2e" in Value
+    scope: Inbound Header Injection
+  - instruction: Enter "X-Served-By" in Key
+    scope: Outbound Header Injection
+  - instruction: Enter "duit-test1" in Value
+    scope: Outbound Header Injection
+  - instruction: Verify the Key input field has the exact value "X-Backend-Source"
+    scope: Inbound Header Injection
+  - instruction: Verify the Value input field has the exact value "duit-e2e"
+    scope: Inbound Header Injection
+  - instruction: Verify the Key input field has the exact value "X-Served-By"
+    scope: Outbound Header Injection
+  - instruction: Verify the Value input field has the exact value "duit-test1"
+    scope: Outbound Header Injection
+  - Click Next
+  - Click the "${API_NAME}" button
+  - Check the checkbox named "${STAGE_ID}"
+  - Click Next
+  - Verify the text "Applying Header Injection directly to 1 selected instance." is visible
+  - Verify the text "${STAGE_ID}" is visible
+  - Click Apply policy
+  - instruction: Click the APIs navigation link
+    context:
+      urlIncludes: https://test1.omni.mulesoft.com/governance-strategy
+      text: Active Strategies
+  - instruction: Enter "${API_NAME}" in Search APIs
+    context:
+      urlIncludes: /apis
+      text: Add API
+  - Click "${API_NAME}"
+  - instruction: Click the Instances tab
+    context:
+      text: Expose as MCP Server
+  - Click the link "${STAGE_ID}"
+  - instruction: Click the Activity log tab
+    context:
+      urlIncludes: /instances/${STAGE_ID}
+      text: Instance Policies
+  - Click Refresh activity
+  - Verify the text "Applied (Open Flow)" is visible
+  - instruction: Verify the Completed status element is visible
+    scope: "Row 1: Header Mapping (1) Applied (Open Flow)"
+    wait:
+      timeoutMs: 120000
+      intervalMs: 5000
+      refreshControl: Refresh activity
+  - Navigate to "https://test1.omni.mulesoft.com${INSTANCE_PATH}"
+  - instruction: Verify the text "Header Mapping" is visible
+    context:
+      urlIncludes: /instances/${STAGE_ID}
+    wait:
+      timeoutMs: 120000
+      intervalMs: 5000
+      refreshPage: true
+  - instruction: Click Edit configuration for Header Mapping GET /headers
+    context:
+      urlIncludes: /instances/${STAGE_ID}
+      text: Header Mapping
+  - instruction: Verify the Name input field has the exact value "X-Backend-Source"
+    scope: Request Headers
+  - instruction: Verify the Value input field has the exact value "duit-e2e"
+    scope: Request Headers
+  - instruction: Verify the Name input field has the exact value "X-Served-By"
+    scope: Response Headers
+  - instruction: Verify the Value input field has the exact value "duit-test1"
+    scope: Response Headers
+publicVariables:
+  - API_NAME
+  - STAGE_ID
+  - INSTANCE_PATH
+cleanup:
+  - Navigate to "https://test1.omni.mulesoft.com${INSTANCE_PATH}"
+  - instruction: Verify the text "Header Mapping" is visible
+    context:
+      urlIncludes: /instances/${STAGE_ID}
+    wait:
+      timeoutMs: 120000
+      intervalMs: 5000
+      refreshPage: true
+  - instruction: Click Edit configuration for Header Mapping GET /headers
+    context:
+      urlIncludes: /instances/${STAGE_ID}
+      text: Header Mapping
+  - instruction: Verify the Name input field has the exact value "X-Backend-Source"
+    scope: Request Headers
+  - instruction: Verify the Name input field has the exact value "X-Served-By"
+    scope: Response Headers
+  - Click the Cancel button
+  - Click More actions for Header Mapping
+  - Click Remove Policy
+  - instruction: Click Remove Policy
+    scope: Remove policy
+  - Verify the text "Header Mapping" is not visible
+  - Click the Activity log tab
+  - Click Refresh activity
+  - instruction: Verify the Completed status element is visible
+    scope: "Row 1: Aws Header Mapping Removed"
+    wait:
+      timeoutMs: 120000
+      intervalMs: 5000
+      refreshControl: Refresh activity

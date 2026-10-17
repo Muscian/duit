@@ -8,10 +8,10 @@ import {
   defaultPolicy,
   type DecisionPolicy,
 } from "./decisions.js";
-import { saveArtifacts, type ReplayPlan } from "./artifacts.js";
+import { StepExecutor, failureCategory, evidence } from "./execution.js";
+import { saveArtifacts, saveCheckpoint, type ReplayPlan } from "./artifacts.js";
 import {
   HarnessError,
-  pageOperations,
   type CaseSpec,
   type DecisionProvider,
   type PlatformAdapter,
@@ -28,8 +28,10 @@ export type RunOptions = {
   signal?: AbortSignal;
   requireAssertions?: boolean;
   maxDurationMs?: number;
+  readinessTimeoutMs?: number;
   screenshots?: boolean;
   onStep?: (step: StepResult) => void;
+  onCleanupStep?: (step: StepResult) => void;
   replay?: ReplayPlan;
 };
 export async function runCase(
@@ -64,6 +66,9 @@ export async function runCase(
   };
   let sanitize = redactor({}, [process.env.JEV_API_KEY ?? ""]);
   let engine: DecisionEngine | undefined;
+  let executor: StepExecutor | undefined;
+  let cleanupSteps: import("./types.js").CompiledStep[] = [];
+  let opened = false;
   const actions: ResolvedAction[] = [];
   const signal = AbortSignal.any([
     AbortSignal.timeout(options.maxDurationMs ?? 300_000),
@@ -78,7 +83,14 @@ export async function runCase(
   signal.addEventListener("abort", abort, { once: true });
   try {
     const variables = resolveVariables(spec.variables);
-    sanitize = redactor(variables, [process.env.JEV_API_KEY ?? ""]);
+    sanitize = redactor(
+      Object.fromEntries(
+        Object.entries(variables).filter(
+          ([name]) => !spec.publicVariables?.includes(name),
+        ),
+      ),
+      [process.env.JEV_API_KEY ?? ""],
+    );
     const policy = { ...defaultPolicy, ...options.policy };
     for (const [key, value] of Object.entries(policy))
       if (!Number.isFinite(value) || value < 0 || value > 1)
@@ -96,6 +108,28 @@ export async function runCase(
       : undefined;
     const steps =
       options.replay?.actions ?? (await engine!.compile(spec.steps, signal));
+    if (options.replay && spec.cleanup?.length)
+      throw new HarnessError(
+        "INVALID_REPLAY",
+        "Replay already contains recorded cleanup actions; do not also supply live cleanup steps",
+      );
+    cleanupSteps = spec.cleanup?.length
+      ? await engine!.compile(spec.cleanup, signal)
+      : [];
+    report.interruptions = [];
+    executor = new StepExecutor({
+      platform: options.platform,
+      engine,
+      variables,
+      interruptions: options.replay ? undefined : spec.interruptions,
+      events: report.interruptions,
+      readinessTimeoutMs: options.readinessTimeoutMs,
+      onInterruptionAction: (action) => actions.push(action),
+      beforeDispatch: async () => {
+        report.diagnostics = options.platform.diagnostics?.();
+        await saveCheckpoint(report, sanitize);
+      },
+    });
     if (
       options.requireAssertions !== false &&
       !steps.some((s) => s.operation.startsWith("assert_"))
@@ -105,10 +139,20 @@ export async function runCase(
         "At least one explicit verification is required",
       );
     // Validate variables before touching the UI.
-    for (const step of steps)
-      if (step.value !== undefined) substitute(step.value, variables);
+    for (const step of [...steps, ...cleanupSteps]) {
+      for (const text of [
+        step.text,
+        step.value,
+        step.scope,
+        step.context?.text,
+        step.context?.urlIncludes,
+        ...(step.aliases ?? []),
+      ])
+        if (text !== undefined) substitute(text, variables);
+    }
     signal.throwIfAborted();
     await options.platform.open(spec.baseUrl);
+    opened = true;
     signal.throwIfAborted();
     for (const [index, step] of steps.entries()) {
       const start = performance.now();
@@ -121,25 +165,12 @@ export async function runCase(
       report.steps.push(result);
       try {
         signal.throwIfAborted();
-        const action = options.replay
-          ? (step as ResolvedAction)
-          : await engine!.resolve(
-              step,
-              pageOperations.has(step.operation)
-                ? undefined
-                : await options.platform.observe(step),
-              signal,
-            );
-        signal.throwIfAborted();
-        result.action = action;
-        await options.platform.execute({
-          ...action,
-          value:
-            action.value === undefined
-              ? undefined
-              : substitute(action.value, variables),
-        });
-        signal.throwIfAborted();
+        const action = await executor.perform(
+          step,
+          result,
+          signal,
+          options.replay ? (step as ResolvedAction) : undefined,
+        );
         actions.push(action);
         result.status = "passed";
       } catch (error) {
@@ -148,6 +179,11 @@ export async function runCase(
           : error instanceof HarnessError
             ? error.status
             : "failed";
+        result.category = failureCategory(error);
+        if (!signal.aborted)
+          try {
+            result.evidence = evidence(await options.platform.observe());
+          } catch {}
         result.error = sanitize(
           signal.aborted
             ? "RUN_CANCELLED: Run cancelled or exceeded its time budget"
@@ -195,6 +231,48 @@ export async function runCase(
           : String(error),
     );
   } finally {
+    if (opened && executor && cleanupSteps.length && !signal.aborted) {
+      report.cleanup = [];
+      for (const [index, step] of cleanupSteps.entries()) {
+        const result: StepResult = {
+          index,
+          text: step.text,
+          status: "blocked",
+          durationMs: 0,
+        };
+        report.cleanup.push(result);
+        const start = performance.now();
+        try {
+          const action = await executor.perform(step, result, signal);
+          actions.push(action);
+          result.status = "passed";
+        } catch (error) {
+          result.status =
+            error instanceof HarnessError ? error.status : "failed";
+          result.category = failureCategory(error);
+          result.error = sanitize(
+            error instanceof Error ? error.message : String(error),
+          );
+          if (report.status === "passed") report.status = "blocked";
+        }
+        result.durationMs = Math.round(performance.now() - start);
+        if (options.screenshots !== false) {
+          const filename = `cleanup-${index + 1}.png`;
+          try {
+            await options.platform.capture(join(artifactsDir, filename));
+            result.screenshot = filename;
+          } catch {
+            report.warnings.push("Cleanup screenshot unavailable");
+          }
+        }
+        options.onCleanupStep?.(JSON.parse(sanitize(JSON.stringify(result))));
+        if (result.status !== "passed") break;
+      }
+    } else if (opened && cleanupSteps.length && signal.aborted) {
+      report.warnings.push(
+        "Cleanup was not executed because the browser was cancelled. Inspect the current resource state before rerunning.",
+      );
+    }
     if (report.error && !signal.aborted && options.screenshots !== false) {
       try {
         await options.platform.capture(join(artifactsDir, "startup.png"));
@@ -213,6 +291,7 @@ export async function runCase(
     report.durationMs = Math.round(performance.now() - started);
     report.decisions = engine?.events ?? [];
     await saveArtifacts(report, spec, actions, sanitize);
+    await saveCheckpoint(report, sanitize, "closed");
   }
   return JSON.parse(sanitize(JSON.stringify(report))) as RunReport;
 }

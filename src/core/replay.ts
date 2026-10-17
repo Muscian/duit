@@ -6,7 +6,7 @@ import {
   valueOperations,
   pageOperations,
 } from "./types.js";
-import { caseSchema } from "./input.js";
+import { caseSchema, assertionWaitSchema } from "./input.js";
 import { type ReplayPlan } from "./artifacts.js";
 const locatorSchema = z
   .object({
@@ -19,6 +19,16 @@ const locatorSchema = z
 const actionSchema = z
   .object({
     text: z.string().min(1).max(2000),
+    wait: assertionWaitSchema.optional(),
+    context: z
+      .object({
+        urlIncludes: z.string().optional(),
+        text: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+    scope: z.string().optional(),
+    aliases: z.array(z.string()).optional(),
     operation: z.enum(
       Object.keys(operations).filter((x) => x !== "unsupported") as [
         Operation,
@@ -27,9 +37,15 @@ const actionSchema = z
     ),
     value: z.string().max(10000).optional(),
     target: locatorSchema.optional(),
+    resolution: z.enum(["exact-label", "jev"]).optional(),
   })
   .strict()
   .superRefine((a, ctx) => {
+    if (a.wait && !a.operation.startsWith("assert_"))
+      ctx.addIssue({
+        code: "custom",
+        message: "Only assertions can be polled",
+      });
     if (valueOperations.has(a.operation) && a.value === undefined)
       ctx.addIssue({
         code: "custom",
@@ -45,7 +61,9 @@ export function parseReplay(raw: unknown): ReplayPlan {
       name: caseSchema.shape.name,
       baseUrl: caseSchema.shape.baseUrl,
       variables: caseSchema.shape.variables,
-      actions: z.array(actionSchema).min(1).max(100),
+      browser: caseSchema.shape.browser,
+      publicVariables: caseSchema.shape.publicVariables,
+      actions: z.array(actionSchema).min(1).max(400),
     })
     .strict()
     .parse(raw);

@@ -11,11 +11,68 @@ const httpUrl = z
     (v) => ["http:", "https:"].includes(new URL(v).protocol),
     "Use http(s)",
   );
+export const assertionWaitSchema = z
+  .object({
+    timeoutMs: z.number().int().min(250).max(300000),
+    intervalMs: z.number().int().min(250).max(30000).optional(),
+    refreshPage: z.boolean().optional(),
+    refreshControl: z.string().trim().min(1).max(300).optional(),
+  })
+  .strict()
+  .refine((wait) => !(wait.refreshPage && wait.refreshControl), {
+    message: "Choose refreshPage or refreshControl, not both",
+  });
+export const stepSchema = z.union([
+  z.string().trim().min(1).max(2000),
+  z
+    .object({
+      instruction: z.string().trim().min(1).max(2000),
+      wait: assertionWaitSchema.optional(),
+      context: z
+        .object({ urlIncludes: z.string().min(1), text: z.string().min(1) })
+        .partial()
+        .strict()
+        .optional(),
+      scope: z.string().trim().min(1).max(500).optional(),
+      aliases: z.array(z.string().trim().min(1).max(300)).max(10).optional(),
+    })
+    .strict(),
+]);
 export const caseSchema = z
   .object({
     name: z.string().trim().min(1).max(200),
     baseUrl: httpUrl,
-    steps: z.array(z.string().trim().min(1).max(2000)).min(1).max(100),
+    steps: z.array(stepSchema).min(1).max(200),
+    cleanup: z.array(stepSchema).max(50).optional(),
+    browser: z
+      .object({
+        allowedOrigins: z.array(httpUrl).max(20).optional(),
+        localNetworkOrigins: z.array(httpUrl).max(20).optional(),
+        channel: z.enum(["chrome", "chromium", "msedge"]).optional(),
+        timeoutMs: z.number().int().positive().max(300000).optional(),
+        navigationTimeoutMs: z.number().int().positive().max(300000).optional(),
+      })
+      .strict()
+      .optional(),
+    publicVariables: z.array(z.string()).max(100).optional(),
+    interruptions: z
+      .array(
+        z
+          .object({
+            name: z.string().min(1).max(100),
+            when: z
+              .object({
+                text: z.string().min(1).max(500),
+                urlIncludes: z.string().min(1).optional(),
+              })
+              .strict(),
+            action: z.string().min(1).max(2000),
+            maxRuns: z.number().int().min(1).max(5).optional(),
+          })
+          .strict(),
+      )
+      .max(20)
+      .optional(),
     variables: z
       .record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string())
       .default({}),

@@ -76,6 +76,10 @@ export type ElementCandidate = {
   disabled: boolean;
   visible: boolean;
   checked?: boolean;
+  occluded?: boolean;
+  blockedByModal?: boolean;
+  overlay?: string;
+  href?: string;
   options?: string[];
   context: string;
   locator: LocatorSpec;
@@ -84,13 +88,44 @@ export type Observation = {
   url: string;
   title: string;
   elements: ElementCandidate[];
+  text?: string;
+  dialogs?: string[];
+};
+export type AssertionWait = {
+  timeoutMs: number;
+  intervalMs?: number;
+  refreshPage?: boolean;
+  refreshControl?: string;
+};
+export type StepContext = { urlIncludes?: string; text?: string };
+export type StepInstruction =
+  | string
+  | {
+      instruction: string;
+      context?: StepContext;
+      scope?: string;
+      aliases?: string[];
+      wait?: AssertionWait;
+    };
+export type InterruptionRule = {
+  name: string;
+  when: { text: string; urlIncludes?: string };
+  action: string;
+  maxRuns?: number;
 };
 export type CompiledStep = {
+  wait?: AssertionWait;
+  context?: StepContext;
+  scope?: string;
+  aliases?: string[];
   text: string;
   operation: Operation;
   value?: string;
 };
-export type ResolvedAction = CompiledStep & { target?: LocatorSpec };
+export type ResolvedAction = CompiledStep & {
+  target?: LocatorSpec;
+  resolution?: "exact-label" | "jev";
+};
 export type PlatformDiagnostics = {
   url?: string;
   browser?: {
@@ -118,6 +153,9 @@ export interface PlatformAdapter {
   open(url: string): Promise<void>;
   observe(step?: CompiledStep): Promise<Observation>;
   execute(action: ResolvedAction): Promise<void>;
+  prepare?(action: ResolvedAction): Promise<void>;
+  refresh?(controlName?: string): Promise<void>;
+  setInterruptionHandler?(handler: () => Promise<void>): void;
   capture(path: string): Promise<void>;
   close(): Promise<void>;
   diagnostics?(): PlatformDiagnostics;
@@ -125,7 +163,17 @@ export interface PlatformAdapter {
 export type CaseSpec = {
   name: string;
   baseUrl: string;
-  steps: string[];
+  steps: StepInstruction[];
+  interruptions?: InterruptionRule[];
+  cleanup?: StepInstruction[];
+  publicVariables?: string[];
+  browser?: {
+    allowedOrigins?: string[];
+    localNetworkOrigins?: string[];
+    channel?: "chrome" | "chromium" | "msedge";
+    timeoutMs?: number;
+    navigationTimeoutMs?: number;
+  };
   variables: Record<string, string>;
 };
 export type DecisionEvent = {
@@ -142,11 +190,30 @@ export type StepResult = {
   action?: ResolvedAction;
   error?: string;
   screenshot?: string;
+  phase?:
+    | "compile"
+    | "context"
+    | "resolve"
+    | "prepare"
+    | "dispatch"
+    | "assert"
+    | "complete";
+  category?: "configuration" | "environment" | "decision" | "ui" | "assertion";
+  recoveredBy?: number;
+  retryOf?: number;
+  pollAttempts?: number;
+  evidence?: {
+    url: string;
+    title: string;
+    text?: string;
+    dialogs?: string[];
+    controls: string[];
+  };
 };
 export type RunReport = {
   version: 1;
   name: string;
-  mode: "live" | "replay";
+  mode: "live" | "replay" | "interactive";
   status: "passed" | "failed" | "blocked";
   startedAt: string;
   durationMs: number;
@@ -154,6 +221,14 @@ export type RunReport = {
   decisions: DecisionEvent[];
   error?: string;
   warnings: string[];
+  interruptions?: Array<{
+    name: string;
+    action: ResolvedAction;
+    url: string;
+    status: "passed" | "blocked";
+    error?: string;
+  }>;
+  cleanup?: StepResult[];
   diagnostics?: PlatformDiagnostics;
   screenshot?: string;
   artifactsDir: string;

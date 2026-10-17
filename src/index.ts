@@ -9,3 +9,5 @@ export * from "./core/replay.js";
 export * from "./providers/jev.js";
 export * from "./platforms/browser.js";
 export * from "./platforms/browser-network.js";
+
+export * from "./core/session.js";

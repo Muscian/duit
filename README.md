@@ -1,6 +1,6 @@
 # duit
 
-End-to-end UI test harness: a list of natural-language steps becomes executable browser actions and assertions. **Jev is the only model used at runtime.** Playwright observes and operates the UI; TypeSafe Jev selects operations, existing values, and DOM targets. There is no code generation, chat, translation by another LLM, or fallback provider.
+End-to-end UI test harness: a list of natural-language steps becomes executable browser actions and assertions. **Jev is the only model used at runtime.** Playwright observes and operates the UI; TypeSafe Jev selects operations, existing values, and semantic DOM targets. Explicit UI labels that uniquely match an observed control are bound deterministically. There is no code generation, chat, translation by another LLM, or fallback provider.
 
 The proof of concept includes a CLI, TypeScript API, browser adapter, executable scenarios, reports, and deterministic replay without a model. It does not include a web editor or a multi-user service.
 
@@ -61,6 +61,12 @@ npm run duit -- run examples/mulesoft-login.en.yaml \
 ```
 
 This permission is scoped to that origin in each fresh context. Add `--channel chrome --headed` to compare with installed Google Chrome. See [macOS/CDN troubleshooting](docs/mulesoft.md#macos-vpn-and-a-blank-sign-in-page) for other error reasons and redirect configuration.
+
+## Authoring and recovering a live session
+
+Use `npm run duit -- explore case.yaml` to retain the browser after a blocked step. Inspect the current UI with `:inspect`, correct a pre-dispatch failure with `:retry`, and resume the plan with `:continue`. An uncertain dispatched action must be verified with `:confirm`, never blindly repeated.
+
+Cases can declare expected `interruptions`, page `context`, control `scope`, explicit name `aliases`, and UI `cleanup`. See [runtime authoring](docs/runtime-authoring.md) for the commands and recovery guarantees, and [Omni Header Injection](docs/omni-header-injection.md) for the real UI-only flow and its validation result.
 
 ## Writing your own cases
 
@@ -150,9 +156,11 @@ flowchart LR
   A[Step list] --> B[Validation and literal candidates]
   B --> C[Jev: operation and value]
   C --> D[DOM observation]
-  D --> E[Jev: choose element]
+  D --> L{Unique explicit label?}
+  L -->|Yes| G[Playwright adapter]
+  L -->|No| E[Jev: choose element]
   E --> F[Confidence policy]
-  F --> G[Playwright adapter]
+  F --> G
   G --> H[Deterministic assertion]
   H --> I[Reports and replay]
 ```
@@ -200,7 +208,7 @@ The live suite starts and stops its own local shop; `npm run demo` is not requir
 
 ## Scope and data
 
-This proof of concept supports conventional DOM flows with atomic steps and explicit data. It includes present iframes with stable order and open shadow DOM. It does not cover canvas, closed shadow DOM, file uploads, drag-and-drop, captchas, interactive MFA, popups/multiple tabs, extracting unknown values for later steps, or open-ended goals that require planning. Initial observation does not implement an autonomous search/repair loop; before selecting a target, it waits up to `--navigation-timeout` for compatible controls to appear. This handles delayed SPA forms, but does not search for a specific control when other candidates already exist. The timeout produces `PAGE_NOT_READY`. The adapter approximates accessible names and should be evaluated against each UI.
+This proof of concept supports conventional DOM flows with atomic steps and explicit data. It includes present iframes with stable order and open shadow DOM. It does not cover canvas, closed shadow DOM, file uploads, drag-and-drop, captchas, interactive MFA, arbitrary switching between existing tabs, extracting unknown values for later steps, or open-ended goals that require planning. New windows are followed within allowed origins. Before dispatch, the executor can refresh observations and target decisions within a bounded readiness deadline, enforce explicit page context, and handle configured notices. It does not invent navigation steps or retry uncertain mutations. Missing targets and context mismatches block with current-page evidence. The adapter approximates accessible names and should be evaluated against each UI.
 
 The model receives steps and descriptions of DOM candidates. It does not receive screenshots or input values from the extractor. Variables are resolved locally and their values are redacted from requests and reports; use `${VARIABLE}` for sensitive data. Values written literally in steps and other page content may be persisted or sent. Opt-in traces are **not redacted** and may contain DOM, network data, and secrets. Masked screenshots are not a general guarantee that PII has been removed. Store artifacts according to your project's data policy.
 

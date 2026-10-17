@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { type RunReport, type ResolvedAction, type CaseSpec } from "./types.js";
 
@@ -7,6 +7,8 @@ export type ReplayPlan = {
   name: string;
   baseUrl: string;
   variables: Record<string, string>;
+  browser?: CaseSpec["browser"];
+  publicVariables?: string[];
   actions: ResolvedAction[];
 };
 const escape = (s: string) =>
@@ -26,11 +28,13 @@ export async function saveArtifacts(
   const reportJson = sanitize(JSON.stringify(report, null, 2));
   await writeFile(join(report.artifactsDir, "report.json"), reportJson);
   // Values stay as variable references. Inline fixture variables are intentionally excluded from replay artifacts.
-  if (report.status === "passed") {
+  if (report.status === "passed" && report.mode !== "interactive") {
     const plan: ReplayPlan = {
       version: 1,
       name: spec.name,
       baseUrl: spec.baseUrl,
+      browser: spec.browser,
+      publicVariables: spec.publicVariables,
       variables: Object.fromEntries(
         Object.entries(spec.variables).map(([k, v]) => [
           k,
@@ -46,13 +50,45 @@ export async function saveArtifacts(
   }
   const safe = JSON.parse(reportJson) as RunReport;
   const failures = safe.status === "passed" ? 0 : 1;
-  const details = safe.error ?? safe.steps.find((s) => s.error)?.error ?? "";
+  const details =
+    safe.error ??
+    safe.steps.find((s) => s.error && s.recoveredBy === undefined)?.error ??
+    safe.cleanup?.find((s) => s.error)?.error ??
+    "";
   await writeFile(
     join(report.artifactsDir, "junit.xml"),
     `<?xml version="1.0" encoding="UTF-8"?>\n<testsuites tests="1" failures="${failures}"><testsuite name="duit" tests="1" failures="${failures}"><testcase name="${escape(safe.name)}" time="${safe.durationMs / 1000}">${failures ? `<failure type="${safe.status}" message="${escape(details)}"/>` : ""}</testcase></testsuite></testsuites>\n`,
   );
   await writeFile(
     join(report.artifactsDir, "report.html"),
-    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escape(safe.name)} · duit</title><style>body{font:16px system-ui;background:#10141d;color:#e6eaf2;max-width:1000px;margin:40px auto;padding:0 24px}h1{font-size:32px}article{background:#1a2130;padding:20px;border-radius:10px;margin:16px 0}small{color:#a8b8cf}pre{white-space:pre-wrap;overflow-wrap:anywhere}img{max-width:100%;border-radius:6px}a{color:#9ecbff}.passed{color:#78e7ae}.failed,.blocked{color:#ff9b9b}</style><h1>${escape(safe.name)}</h1><p class="${safe.status}">${safe.status.toUpperCase()} · ${(safe.durationMs / 1000).toFixed(2)} s · ${safe.mode}</p><small>${escape(safe.startedAt)} · ${safe.decisions.length} model requests</small>${safe.error ? `<pre>${escape(safe.error)}</pre>` : ""}${safe.screenshot ? `<details><summary>Startup screenshot</summary><img src="${escape(safe.screenshot)}" alt="Startup state"></details>` : ""}${safe.diagnostics ? `<details><summary>Connection and network diagnostics</summary><pre>${escape(JSON.stringify(safe.diagnostics, null, 2))}</pre></details>` : ""}${safe.steps.map((s) => `<article><b class="${s.status}">${s.index + 1}. ${s.status}</b><p>${escape(s.text)}</p><small>${s.durationMs} ms · ${escape(s.action?.operation ?? "unresolved")}</small>${s.error ? `<pre>${escape(s.error)}</pre>` : ""}${s.screenshot ? `<details><summary>Screenshot</summary><img src="${escape(s.screenshot)}" alt="Step ${s.index + 1}"></details>` : ""}</article>`).join("")}<p>${safe.warnings.map(escape).join("<br>")}</p><p><a href="report.json">JSON</a> · <a href="junit.xml">JUnit</a>${safe.status === "passed" ? ' · <a href="replay.json">Replay plan</a>' : ""}</p></html>`,
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escape(safe.name)} · duit</title><style>body{font:16px system-ui;background:#10141d;color:#e6eaf2;max-width:1000px;margin:40px auto;padding:0 24px}h1{font-size:32px}article{background:#1a2130;padding:20px;border-radius:10px;margin:16px 0}small{color:#a8b8cf}pre{white-space:pre-wrap;overflow-wrap:anywhere}img{max-width:100%;border-radius:6px}a{color:#9ecbff}.passed{color:#78e7ae}.failed,.blocked{color:#ff9b9b}</style><h1>${escape(safe.name)}</h1><p class="${safe.status}">${safe.status.toUpperCase()} · ${(safe.durationMs / 1000).toFixed(2)} s · ${safe.mode}</p><small>${escape(safe.startedAt)} · ${safe.decisions.length} model requests</small>${safe.error ? `<pre>${escape(safe.error)}</pre>` : ""}${safe.screenshot ? `<details><summary>Startup screenshot</summary><img src="${escape(safe.screenshot)}" alt="Startup state"></details>` : ""}${safe.diagnostics ? `<details><summary>Connection and network diagnostics</summary><pre>${escape(JSON.stringify(safe.diagnostics, null, 2))}</pre></details>` : ""}${safe.interruptions?.length ? `<details><summary>Handled interruptions</summary><pre>${escape(JSON.stringify(safe.interruptions, null, 2))}</pre></details>` : ""}${safe.cleanup?.length ? `<details><summary>Cleanup</summary><pre>${escape(JSON.stringify(safe.cleanup, null, 2))}</pre></details>` : ""}${safe.steps.map((s) => `<article><b class="${s.status}">${s.index + 1}. ${s.status}</b><p>${escape(s.text)}</p><small>${s.durationMs} ms · ${escape(s.action?.operation ?? "unresolved")} · ${escape(s.action?.resolution ?? "page operation")}</small>${s.recoveredBy !== undefined ? `<p>Recovered by step ${s.recoveredBy + 1}</p>` : ""}${s.error ? `<pre>${escape(s.error)}</pre>` : ""}${s.evidence ? `<details><summary>Page and available controls (${escape(s.phase ?? "unknown phase")})</summary><pre>${escape(JSON.stringify(s.evidence, null, 2))}</pre></details>` : ""}${s.screenshot ? `<details><summary>Screenshot</summary><img src="${escape(s.screenshot)}" alt="Step ${s.index + 1}"></details>` : ""}</article>`).join("")}<p>${safe.warnings.map(escape).join("<br>")}</p><p><a href="report.json">JSON</a> · <a href="junit.xml">JUnit</a>${safe.status === "passed" && safe.mode !== "interactive" ? ' · <a href="replay.json">Replay plan</a>' : ""}</p></html>`,
   );
+}
+
+export async function saveCheckpoint(
+  report: RunReport,
+  sanitize: (s: string) => string,
+  lifecycle: "open" | "closed" = "open",
+) {
+  const path = join(report.artifactsDir, "checkpoint.json");
+  const contents = {
+    version: 1,
+    lifecycle,
+    url: report.diagnostics?.url,
+    steps: report.steps.map(
+      ({ index, text, status, phase, recoveredBy, retryOf }) => ({
+        index,
+        text,
+        status,
+        phase,
+        recoveredBy,
+        retryOf,
+      }),
+    ),
+    cleanup: report.cleanup,
+    instructions:
+      "A dispatch without a completed result is uncertain. Inspect the UI before continuing. This checkpoint must never be replayed as an action plan.",
+  };
+  await writeFile(path + ".tmp", sanitize(JSON.stringify(contents, null, 2)));
+  await rename(path + ".tmp", path);
 }

@@ -293,7 +293,7 @@ test("page-controlled content is sanitized before going to the decision provider
     );
   await assert.rejects(
     engine.resolve(
-      { text: "Click Save", operation: "click" },
+      { text: "Click the control that saves the form", operation: "click" },
       {
         url: "http://localhost",
         title: "private-value",

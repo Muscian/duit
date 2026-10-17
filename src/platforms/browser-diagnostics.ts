@@ -11,10 +11,18 @@ export class BrowserNetworkDiagnostics {
 
   constructor(private record: (event: NetworkEvent) => void) {}
 
+  private currentFrame(request: Request): boolean {
+    // Popup navigation is emitted before Playwright has created its frame.
+    try {
+      return request.frame() === this.page?.mainFrame();
+    } catch {
+      return false;
+    }
+  }
   private critical(request: Request): boolean {
     return (
       ["script", "stylesheet"].includes(request.resourceType()) &&
-      request.frame() === this.page?.mainFrame()
+      this.currentFrame(request)
     );
   }
 
@@ -29,10 +37,7 @@ export class BrowserNetworkDiagnostics {
 
   attach(context: BrowserContext) {
     context.on("request", (request) => {
-      if (
-        request.isNavigationRequest() &&
-        request.frame() === this.page?.mainFrame()
-      )
+      if (request.isNavigationRequest() && this.currentFrame(request))
         this.failures.clear();
     });
     context.on("requestfailed", (request) =>
@@ -69,6 +74,7 @@ export class BrowserNetworkDiagnostics {
 
   async attachPage(page: Page, chromium: boolean) {
     this.page = page;
+    this.failures.clear();
     if (!chromium) return;
     const session = await page.context().newCDPSession(page);
     const requests = new Map<string, { url: string; resourceType: string }>();

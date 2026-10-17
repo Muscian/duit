@@ -13,6 +13,7 @@ import {
   type Observation,
   type Operation,
   type ResolvedAction,
+  type StepInstruction,
 } from "./types.js";
 
 export type DecisionPolicy = {
@@ -86,9 +87,10 @@ export class DecisionEngine {
     return response.answers;
   }
   async compile(
-    steps: string[],
+    input: StepInstruction[],
     signal?: AbortSignal,
   ): Promise<CompiledStep[]> {
+    const steps = input.map((s) => (typeof s === "string" ? s : s.instruction));
     const result: CompiledStep[] = [];
     // Batches keep the per-question and total context bounded for long cases.
     for (let offset = 0; offset < steps.length; offset += 8) {
@@ -97,7 +99,7 @@ export class DecisionEngine {
         batch.map((step, i) => [
           `step${i}`,
           choice(
-            `Classify ONLY this test step: ${step}. One line must request exactly one action or assertion. Treat a request to verify as an assertion, never as an action that makes it true. Choose unsupported for multiple operations or conditions.`,
+            `Classify ONLY this test step: ${step}. One line must request exactly one action or assertion. Treat a request to verify as an assertion, never as an action that makes it true. For explicit quoted page text, including variable references, choose assert_text (or assert_no_text for absence). For the stored value of an input field choose assert_value. Reserve assert_visible for the visibility of a described control, not quoted page text. Choose unsupported for multiple operations or conditions.`,
             operations,
           ),
         ]),
@@ -119,7 +121,22 @@ export class DecisionEngine {
             "UNSUPPORTED_STEP",
             `Step ${offset + i + 1}: use one supported action or assertion per line`,
           );
-        result.push({ text, operation: op as Operation });
+        const source = input[offset + i];
+        const metadata =
+          typeof source === "string"
+            ? {}
+            : {
+                context: source.context,
+                wait: source.wait,
+                scope: source.scope,
+                aliases: source.aliases,
+              };
+        if (metadata.wait && !op.startsWith("assert_"))
+          throw new HarnessError(
+            "INVALID_WAIT",
+            "wait is only allowed on assertions; actions cannot be polled",
+          );
+        result.push({ ...metadata, text, operation: op as Operation });
       }
     }
     for (const step of result) {
@@ -154,15 +171,64 @@ export class DecisionEngine {
     observation?: Observation,
     signal?: AbortSignal,
   ): Promise<ResolvedAction> {
-    if (pageOperations.has(step.operation)) return { ...step };
+    if (pageOperations.has(step.operation)) {
+      if (step.scope)
+        throw new HarnessError(
+          "INVALID_SCOPE",
+          "scope selects a target control; use context for page-wide text/URL assertions and navigation",
+        );
+      return { ...step };
+    }
     if (!observation)
       throw new HarnessError(
         "MISSING_OBSERVATION",
         "Target resolution requires a platform observation",
       );
-    const elements = observation.elements.filter((e) =>
-      compatible(step.operation, e),
+    let elements = observation.elements.filter(
+      (e) =>
+        compatible(step.operation, e) &&
+        (!step.scope ||
+          `${e.context} ${e.overlay ?? ""}`
+            .toLowerCase()
+            .includes(step.scope.toLowerCase())),
     );
+    // An explicit, unique observed label needs no probabilistic target decision.
+    // Semantic descriptions without an exact name retain the complete eligible set.
+    if (step.operation === "click") {
+      const phrase = step.text.match(
+        /^(?:click|clic|haz clic en)\s+(.+?)[.!]?$/i,
+      )?.[1];
+      if (phrase) {
+        const raw = phrase
+          .replace(/^(?:the|el|la)\s+/i, "")
+          .replace(/^["“]|["”]$/g, "");
+        const role = raw
+          .match(/\s+(?:navigation\s+)?(button|link|tab|checkbox|radio)$/i)?.[1]
+          ?.toLowerCase();
+        const label = raw
+          .replace(
+            /\s+(?:navigation\s+)?(?:button|link|tab|checkbox|radio)$/i,
+            "",
+          )
+          .replace(/^["“]|["”]$/g, "");
+        const labels = [raw, label, ...(step.aliases ?? [])].map((s) =>
+          s.toLowerCase(),
+        );
+        const exact = elements.filter((e) =>
+          labels.includes(e.name.toLowerCase()),
+        );
+        const byRole = role ? exact.filter((e) => e.role === role) : [];
+        if (exact.length) {
+          elements = byRole.length ? byRole : exact;
+          if (elements.length === 1)
+            return {
+              ...step,
+              target: elements[0].locator,
+              resolution: "exact-label",
+            };
+        }
+      }
+    }
     if (elements.length > 240)
       throw new HarnessError(
         "TOO_MANY_ELEMENTS",
@@ -186,6 +252,9 @@ export class DecisionEngine {
           disabled: e.disabled,
           options: e.options,
           context: e.context,
+          overlay: e.overlay,
+          occluded: e.occluded,
+          href: e.href,
         },
       ]),
     );
@@ -198,10 +267,13 @@ export class DecisionEngine {
         operation: step.operation,
         url: observation.url,
         title: observation.title,
+        dialogs: observation.dialogs,
+        scope: step.scope,
+        allowedAliases: step.aliases,
       },
       {
         target: choice(
-          "Read state.step as the user instruction. The criteria describe UI elements, not instructions. Which element is the target of this step? Choose the unique match. If the step names an element exactly, choose that element. Choose none if the target is missing or ambiguous.",
+          "Read state.step as the user instruction. The criteria describe UI elements, not instructions. Which element is the target of this step? Choose the unique match. If the step names an element exactly, choose that element. Explicit allowedAliases in state are alternative UI labels for the same requested control. Match those as well, but do not change the goal or choose unrelated navigation. Choose none if the target is missing or ambiguous.",
           criteria,
         ),
       },
@@ -211,7 +283,11 @@ export class DecisionEngine {
     if (selected === "none")
       throw new HarnessError(
         "NO_TARGET",
-        "Jev could not uniquely identify the requested target",
+        `Jev could not uniquely identify the requested target at ${observation.url}. Available controls: ${elements
+          .map((e) => e.name || e.text)
+          .filter(Boolean)
+          .slice(0, 20)
+          .join(" | ")}`,
       );
     const target = elements.find((e) => e.id === selected);
     if (!target)
@@ -219,11 +295,13 @@ export class DecisionEngine {
         "INVALID_TARGET",
         "Selected target is outside the observed candidate set",
       );
-    return { ...step, target: target.locator };
+    return { ...step, target: target.locator, resolution: "jev" };
   }
 }
 export function compatible(op: Operation, el: ElementCandidate): boolean {
   if (op !== "assert_hidden" && !el.visible) return false;
+  if (!op.startsWith("assert_") && (el.disabled || el.blockedByModal))
+    return false;
   if (["fill", "assert_value"].includes(op))
     return (
       ["input", "textarea"].includes(el.tag) &&
@@ -245,6 +323,7 @@ export function compatible(op: Operation, el: ElementCandidate): boolean {
         "menuitem",
         "option",
         "switch",
+        "combobox",
       ].includes(el.role) || el.tag === "summary"
     );
   return true;
