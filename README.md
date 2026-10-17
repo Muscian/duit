@@ -52,6 +52,16 @@ npm run duit -- run examples/mulesoft-login.en.yaml --timeout 30000 --navigation
 
 `--proxy` is unnecessary when `HTTPS_PROXY` is already configured. This flow uses real Jev and browser actions, with no pre-authenticated session. See [docs/mulesoft.md](docs/mulesoft.md) for the reproduced failure, fixes, and results.
 
+If a fresh browser on macOS/VPN shows a blank page and CDN scripts/styles fail with `ERR_FAILED`, inspect `browser_network_error` in the report. For `LocalNetworkAccessPermissionDenied`, grant local-network access to the **page requesting the assets**:
+
+```bash
+npm run duit -- run examples/mulesoft-login.en.yaml \
+  --allow-local-network-origin https://test1.platform.mulesoft.com \
+  --timeout 30000 --navigation-timeout 60000
+```
+
+This permission is scoped to that origin in each fresh context. Add `--channel chrome --headed` to compare with installed Google Chrome. See [macOS/CDN troubleshooting](docs/mulesoft.md#macos-vpn-and-a-blank-sign-in-page) for other error reasons and redirect configuration.
+
 ## Writing your own cases
 
 ```yaml
@@ -118,6 +128,8 @@ Exit codes: `0` passed, `1` action/assertion failed, `2` blocked/configuration e
 | `JEV_ENDPOINT`                   | `https://api.typesafe.ai/v1/systemone`                                                                  |
 | `DUIT_BROWSER_PROXY` / `--proxy` | Inherits HTTP(S)_PROXY / ALL_PROXY; respects NO_PROXY                                                   |
 | `--browser`                      | `chromium`; also `firefox`, `webkit` if installed                                                       |
+| `--channel`                      | Optional Chromium distribution: `chrome`, `msedge`, `chromium`; installed Chrome/Edge must be available |
+| `--allow-local-network-origin`   | No grants by default; repeat to grant local-network access to a baseUrl/allowed page origin             |
 | `--navigation-timeout`           | 30000 ms for document navigation and SPA controls                                                       |
 | `--timeout`                      | 5000 ms per action/assertion                                                                            |
 | `--budget`                       | 300000 ms per run                                                                                       |
@@ -128,6 +140,8 @@ Exit codes: `0` passed, `1` action/assertion failed, `2` blocked/configuration e
 | `--no-screenshots`               | Disable screenshots                                                                                     |
 
 The Jev API respects `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and Node's CA trust. The browser also inherits the environment proxy. `--proxy` takes precedence over `DUIT_BROWSER_PROXY`, which overrides standard proxy variables. Use `--proxy direct` for an explicit direct connection. Reports include the effective connection configuration and network errors. TLS is not disabled. Only transient transport/HTTP errors are retried, within a budget and with backoff; clicks and form submissions are never retried.
+
+Chromium reports include its version/channel and CDP `blockedReason`/`corsError` when provided by the browser. A blank page with failed main-frame scripts/styles produces `PAGE_RESOURCES_FAILED` and a `blocked` result, including for negative text assertions. A pre-login profile 401 is diagnostic evidence only. A rendered page with an incorrect expected text remains an assertion failure even if an optional script failed.
 
 ## Architecture and extension
 

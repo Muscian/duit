@@ -29,6 +29,7 @@ test(
         platform: new BrowserAdapter({
           timeoutMs: 30000,
           navigationTimeoutMs: 60000,
+          localNetworkOrigins: [new URL(spec.baseUrl).origin],
           maskValues: Object.values(resolveVariables(spec.variables)),
         }),
         maxDurationMs: 120000,

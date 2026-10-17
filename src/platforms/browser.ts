@@ -22,6 +22,7 @@ import {
 } from "../core/types.js";
 
 import { browserConnection, diagnosticUrl } from "./browser-network.js";
+import { BrowserNetworkDiagnostics } from "./browser-diagnostics.js";
 import { compatible } from "../core/decisions.js";
 
 type DomCandidate = Omit<ElementCandidate, "id" | "locator"> & {
@@ -31,6 +32,8 @@ type DomCandidate = Omit<ElementCandidate, "id" | "locator"> & {
 };
 export type BrowserOptions = {
   proxy?: string;
+  channel?: "chrome" | "msedge" | "chromium";
+  localNetworkOrigins?: string[];
   browser?: "chromium" | "firefox" | "webkit";
   headed?: boolean;
   timeoutMs?: number;
@@ -50,6 +53,9 @@ export class BrowserAdapter implements PlatformAdapter {
   private baseUrl = "";
   private disposed = false;
   private diagnosticState: PlatformDiagnostics = { events: [] };
+  private network = new BrowserNetworkDiagnostics((event) =>
+    this.networkEvent(event),
+  );
   diagnostics(): PlatformDiagnostics {
     return {
       ...this.diagnosticState,
@@ -76,6 +82,30 @@ export class BrowserAdapter implements PlatformAdapter {
       new URL(url).origin,
       ...(this.options.allowedOrigins ?? []).map((s) => new URL(s).origin),
     ]);
+    if (
+      this.options.channel &&
+      (this.options.browser ?? "chromium") !== "chromium"
+    )
+      throw new HarnessError(
+        "INVALID_BROWSER_OPTIONS",
+        "--channel requires --browser chromium",
+      );
+    const localNetworkOrigins = [
+      ...new Set(
+        (this.options.localNetworkOrigins ?? []).map((value) => {
+          const parsed = new URL(value);
+          if (
+            !["http:", "https:"].includes(parsed.protocol) ||
+            !this.origins.has(parsed.origin)
+          )
+            throw new HarnessError(
+              "INVALID_BROWSER_OPTIONS",
+              "Local-network permission requires a baseUrl or --allow-origin HTTP(S) origin",
+            );
+          return parsed.origin;
+        }),
+      ),
+    ];
     const { connection, proxy } = browserConnection(url, this.options.proxy);
     this.diagnosticState = { url: diagnosticUrl(url), connection, events: [] };
     this.browser = await { chromium, firefox, webkit }[
@@ -83,6 +113,7 @@ export class BrowserAdapter implements PlatformAdapter {
     ].launch({
       headless: !this.options.headed,
       proxy,
+      channel: this.options.channel,
     });
     if (this.disposed) {
       await this.browser.close();
@@ -93,25 +124,29 @@ export class BrowserAdapter implements PlatformAdapter {
       storageState: this.options.storageState,
       serviceWorkers: "block",
     });
+    this.diagnosticState.browser = {
+      name: this.options.browser ?? "chromium",
+      version: this.browser.version(),
+      channel: this.options.channel,
+      localNetworkOrigins,
+    };
+    for (const origin of localNetworkOrigins) {
+      try {
+        await this.context.grantPermissions(["local-network-access"], {
+          origin,
+        });
+      } catch {
+        throw new HarnessError(
+          "LOCAL_NETWORK_PERMISSION_UNSUPPORTED",
+          "This browser cannot grant local-network-access; update Playwright/browser or select a supported Chromium channel",
+        );
+      }
+    }
     this.context.setDefaultTimeout(this.options.timeoutMs ?? 5000);
     this.context.setDefaultNavigationTimeout(
       this.options.navigationTimeoutMs ?? 30_000,
     );
-    this.context.on("requestfailed", (request) =>
-      this.networkEvent({
-        kind: "request_failed",
-        url: diagnosticUrl(request.url()),
-        message: request.failure()?.errorText,
-      }),
-    );
-    this.context.on("response", (response) => {
-      if (response.status() >= 400)
-        this.networkEvent({
-          kind: "http_error",
-          url: diagnosticUrl(response.url()),
-          status: response.status(),
-        });
-    });
+    this.network.attach(this.context);
     await this.context.route("**/*", async (route) => {
       const req = route.request();
       if (
@@ -133,6 +168,10 @@ export class BrowserAdapter implements PlatformAdapter {
         sources: false,
       });
     this.page = await this.context.newPage();
+    await this.network.attachPage(
+      this.page,
+      (this.options.browser ?? "chromium") === "chromium",
+    );
     await this.navigate(url);
   }
   private current(): Page {
@@ -206,6 +245,8 @@ export class BrowserAdapter implements PlatformAdapter {
       // Closing the browser on cancellation interrupts this short wait immediately.
       await page.waitForTimeout(Math.min(250, remaining));
     } while (Date.now() < deadline);
+    const resourceError = this.network.resourceError();
+    if (resourceError) throw resourceError;
     throw new HarnessError(
       "PAGE_NOT_READY",
       `No eligible controls appeared for ${step.operation} at ${diagnosticUrl(page.url())}; inspect network diagnostics or increase --navigation-timeout`,
@@ -306,6 +347,24 @@ export class BrowserAdapter implements PlatformAdapter {
     }
   }
   async execute(action: ResolvedAction): Promise<void> {
+    const textAssertion = ["assert_text", "assert_no_text"].includes(
+      action.operation,
+    );
+    try {
+      if (action.operation === "assert_no_text") {
+        const error = await this.network.blankPageError();
+        if (error) throw error;
+      }
+      await this.executeAction(action);
+    } catch (error) {
+      if (textAssertion) {
+        const resourceError = await this.network.blankPageError();
+        if (resourceError) throw resourceError;
+      }
+      throw error;
+    }
+  }
+  private async executeAction(action: ResolvedAction): Promise<void> {
     const page = this.current();
     const timeout = this.options.timeoutMs ?? 5000;
     const op = action.operation;

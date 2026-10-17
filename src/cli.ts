@@ -10,7 +10,7 @@ import { parseReplay } from "./core/replay.js";
 import { JevProvider } from "./providers/jev.js";
 import { BrowserAdapter, type BrowserOptions } from "./platforms/browser.js";
 
-const help = `duit — natural-language UI tests powered only by Jev\n\n  npm run duit -- run case.yaml [options]\n  npm run duit -- run steps.txt --base-url http://localhost:4173\n  npm run duit -- replay artifacts/<run>/replay.json [options]\n\nOptions:\n  --base-url URL         Override starting URL (required for .txt/.md)\n  --out DIRECTORY       New artifact directory (must not already exist)\n  --browser NAME        chromium (default), firefox, webkit\n  --proxy URL           Override browser proxy; default inherits HTTP(S)_PROXY. Use "direct" to opt out\n  --headed              Show the browser\n  --timeout MS          Playwright action/assertion timeout (default 5000)\n  --navigation-timeout MS  Document and SPA readiness timeout (default 30000)\n  --budget MS           Whole-run deadline (default 300000)\n  --min-probability N    Decision threshold 0..1 (default 0.70)\n  --allow-origin URL    Allow additional navigation origin; repeatable\n  --storage-state FILE  Playwright authentication state\n  --trace               Record an unredacted Playwright trace (opt in)\n  --no-screenshots       Disable masked screenshots\n\nExit codes: 0 passed, 1 assertion/action failed, 2 blocked/configuration error.\n`;
+const help = `duit — natural-language UI tests powered only by Jev\n\n  npm run duit -- run case.yaml [options]\n  npm run duit -- run steps.txt --base-url http://localhost:4173\n  npm run duit -- replay artifacts/<run>/replay.json [options]\n\nOptions:\n  --base-url URL         Override starting URL (required for .txt/.md)\n  --out DIRECTORY       New artifact directory (must not already exist)\n  --browser NAME        chromium (default), firefox, webkit\n  --channel NAME        Chromium distribution: chrome, msedge, chromium (fresh session)\n  --allow-local-network-origin URL  Grant local-network access to this page origin; repeatable\n  --proxy URL           Override browser proxy; default inherits HTTP(S)_PROXY. Use "direct" to opt out\n  --headed              Show the browser\n  --timeout MS          Playwright action/assertion timeout (default 5000)\n  --navigation-timeout MS  Document and SPA readiness timeout (default 30000)\n  --budget MS           Whole-run deadline (default 300000)\n  --min-probability N    Decision threshold 0..1 (default 0.70)\n  --allow-origin URL    Allow additional navigation origin; repeatable\n  --storage-state FILE  Playwright authentication state\n  --trace               Record an unredacted Playwright trace (opt in)\n  --no-screenshots       Disable masked screenshots\n\nExit codes: 0 passed, 1 assertion/action failed, 2 blocked/configuration error.\n`;
 async function main() {
   const { values: v, positionals: p } = parseArgs({
     allowPositionals: true,
@@ -19,6 +19,8 @@ async function main() {
       "base-url": { type: "string" },
       out: { type: "string" },
       browser: { type: "string" },
+      channel: { type: "string" },
+      "allow-local-network-origin": { type: "string", multiple: true },
       proxy: { type: "string" },
       headed: { type: "boolean" },
       timeout: { type: "string" },
@@ -41,6 +43,14 @@ async function main() {
   const browser = v.browser ?? "chromium";
   if (!["chromium", "firefox", "webkit"].includes(browser))
     throw new Error("Invalid browser");
+  if (
+    v.channel &&
+    (!["chrome", "msedge", "chromium"].includes(v.channel) ||
+      browser !== "chromium")
+  )
+    throw new Error(
+      "--channel must be chrome, msedge or chromium and requires --browser chromium",
+    );
   const numeric = (raw: string | undefined, fallback: number) => {
     const n = raw === undefined ? fallback : Number(raw);
     if (!Number.isFinite(n) || n <= 0)
@@ -72,6 +82,8 @@ async function main() {
   const provider = replay ? undefined : new JevProvider();
   const platform = new BrowserAdapter({
     browser: browser as BrowserOptions["browser"],
+    channel: v.channel as BrowserOptions["channel"],
+    localNetworkOrigins: v["allow-local-network-origin"],
     headed: v.headed,
     proxy: v.proxy,
     timeoutMs: numeric(v.timeout, 5000),

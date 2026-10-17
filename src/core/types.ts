@@ -93,12 +93,25 @@ export type CompiledStep = {
 export type ResolvedAction = CompiledStep & { target?: LocatorSpec };
 export type PlatformDiagnostics = {
   url?: string;
+  browser?: {
+    name: string;
+    version: string;
+    channel?: string;
+    localNetworkOrigins: string[];
+  };
   connection?: { mode: "direct" | "proxy"; source: string; proxy?: string };
   events: Array<{
-    kind: "request_failed" | "http_error" | "navigation_blocked";
+    kind:
+      | "request_failed"
+      | "http_error"
+      | "navigation_blocked"
+      | "browser_network_error";
     url: string;
     status?: number;
     message?: string;
+    resourceType?: string;
+    blockedReason?: string;
+    corsError?: string;
   }>;
 };
 export interface PlatformAdapter {
