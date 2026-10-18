@@ -37,17 +37,20 @@ export class PlatformRegistry {
   }
 }
 export const summarize = (report: RunReport) => ({
+  privacy: report.privacy,
+  agent: report.agent,
   name: report.name,
   status: report.status,
   durationMs: report.durationMs,
   usage: report.usage,
   contentUsage: report.contentUsage,
-  steps: report.steps.map(({ index, text, status, error, phase }) => ({
+  steps: report.steps.map(({ index, text, status, error, phase, failure }) => ({
     index,
     text,
     status,
     error,
     phase,
+    failure,
   })),
   cleanup: report.cleanup?.map(({ index, text, status, error }) => ({
     index,

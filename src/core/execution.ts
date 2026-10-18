@@ -1,3 +1,4 @@
+import { privacyDenied, type PrivacyPolicy } from "./privacy.js";
 import type { FieldWriter } from "./content.js";
 import { DecisionEngine } from "./decisions.js";
 import { substitute } from "./input.js";
@@ -65,6 +66,7 @@ export class StepExecutor {
   private compiledRules = new Map<string, CompiledStep>();
   constructor(
     private options: {
+      privacy?: PrivacyPolicy;
       platform: PlatformAdapter;
       engine?: DecisionEngine;
       variables: Record<string, string>;
@@ -188,6 +190,20 @@ export class StepExecutor {
           status: "blocked",
         };
         events.push(event);
+        // Persist notice clicks too: a crashed handler must not look like an
+        // untouched main step when an agent reads the checkpoint.
+        event.dispatched = true;
+        try {
+          await this.options.beforeDispatch?.();
+        } catch {
+          event.dispatched = false;
+          event.error =
+            "CHECKPOINT_WRITE_FAILED: No interruption action dispatched";
+          throw new HarnessError(
+            "CHECKPOINT_WRITE_FAILED",
+            "Could not persist the interruption checkpoint; no action was dispatched",
+          );
+        }
         try {
           signal?.throwIfAborted();
           // Count dispatch, not success: a notice click is never repeated after an uncertain result.
@@ -209,7 +225,10 @@ export class StepExecutor {
           this.options.onInterruptionAction?.(action);
         } catch (error) {
           event.error = error instanceof Error ? error.message : String(error);
-          throw error;
+          throw new HarnessError(
+            "ACTION_OUTCOME_UNKNOWN",
+            `Interruption action did not complete reliably. ${event.error}`,
+          );
         }
       } finally {
         this.activeRules.delete(rule.name);
@@ -306,6 +325,8 @@ export class StepExecutor {
       step.visual !== "off" &&
       this.options.visual?.enabled;
     const visualResolve = async () => {
+      if (this.options.privacy && !this.options.privacy.images)
+        privacyDenied("visual decisions");
       if (!platform.observeVisual || !engine)
         throw new HarnessError(
           "VISUAL_UNAVAILABLE",
@@ -548,6 +569,7 @@ export class StepExecutor {
       throw error;
     }
     signal?.throwIfAborted();
+    delete result.failure;
     result.phase = "complete";
     return action;
   }

@@ -1,3 +1,8 @@
+import {
+  resolvePrivacy,
+  privacyDenied,
+  type PrivacyPolicy,
+} from "../core/privacy.js";
 import "../load-env.js";
 import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -48,6 +53,10 @@ export type BrowserOptions = {
   viewport?: { width: number; height: number };
 };
 export class BrowserAdapter implements PlatformAdapter {
+  private privacy = resolvePrivacy();
+  configurePrivacy(policy: PrivacyPolicy) {
+    this.privacy = resolvePrivacy({ mode: policy.mode });
+  }
   private browser?: Browser;
   private context?: BrowserContext;
   private page?: Page;
@@ -133,6 +142,8 @@ export class BrowserAdapter implements PlatformAdapter {
   }
   constructor(private options: BrowserOptions = {}) {}
   async open(url: string) {
+    if (this.options.tracePath && !this.privacy.detailedArtifacts)
+      privacyDenied("unredacted traces");
     if (this.disposed)
       throw new HarnessError(
         "BROWSER_CLOSED",
@@ -719,6 +730,7 @@ export class BrowserAdapter implements PlatformAdapter {
     this.current();
   }
   async observeVisual(): Promise<VisualFrame> {
+    if (!this.privacy.images) privacyDenied("visual observations");
     await this.settlePopups();
     const page = this.current(),
       size = page.viewportSize();
@@ -801,6 +813,7 @@ export class BrowserAdapter implements PlatformAdapter {
       );
   }
   async capture(path: string): Promise<void> {
+    if (!this.privacy.images) privacyDenied("screenshots");
     const page = this.current();
     const mask = page
       .frames()

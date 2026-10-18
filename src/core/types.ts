@@ -1,3 +1,5 @@
+import type { PrivacyOptions, PrivacyPolicy } from "./privacy.js";
+import type { FailureInfo, AgentReport } from "./failures.js";
 import type { GenerateField, ContentOptions, FieldWriter } from "./content.js";
 export const operations = {
   click: "Click or activate a button, link or control",
@@ -217,6 +219,7 @@ export type PlatformDiagnostics = {
   }>;
 };
 export interface PlatformAdapter {
+  configurePrivacy?(policy: PrivacyPolicy): void;
   open(url: string): Promise<void>;
   observe(step?: CompiledStep): Promise<Observation>;
   observeVisual?(): Promise<VisualFrame>;
@@ -229,6 +232,7 @@ export interface PlatformAdapter {
   diagnostics?(): PlatformDiagnostics;
 }
 export type CaseSpec = {
+  privacy?: PrivacyOptions;
   platform?: string;
   content?: ContentOptions;
   visual?: VisualOptions;
@@ -255,6 +259,7 @@ export type DecisionEvent = {
   response: DecisionResponse;
 };
 export type StepResult = {
+  failure?: FailureInfo;
   index: number;
   text: string;
   status: "passed" | "failed" | "blocked";
@@ -271,7 +276,7 @@ export type StepResult = {
     | "dispatch"
     | "assert"
     | "complete";
-  category?: "configuration" | "environment" | "decision" | "ui" | "assertion";
+  category?: FailureInfo["category"] | "ui";
   recoveredBy?: number;
   retryOf?: number;
   pollAttempts?: number;
@@ -284,6 +289,10 @@ export type StepResult = {
   };
 };
 export type RunReport = {
+  privacy?: PrivacyPolicy;
+  agent?: AgentReport;
+  lifecycle?: "open" | "closed";
+  cleanupExpected?: number;
   version: 1;
   name: string;
   mode: "live" | "replay" | "interactive";
@@ -306,6 +315,7 @@ export type RunReport = {
   warnings: string[];
   interruptions?: Array<{
     name: string;
+    dispatched?: boolean;
     action: ResolvedAction;
     url: string;
     status: "passed" | "blocked";

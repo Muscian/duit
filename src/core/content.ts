@@ -1,3 +1,4 @@
+import { privacyDenied } from "./privacy.js";
 import { HarnessError } from "./types.js";
 export type GenerateField = { prompt: string; maxChars?: number };
 export type ContentOptions = {
@@ -39,11 +40,13 @@ export class FieldWriter {
     private provider: ContentProvider | undefined,
     private options: ContentOptions | undefined,
     private sanitize: (s: string) => string,
+    private allowed = true,
   ) {
     this.usage.inputPerMillion = options?.inputPerMillion ?? null;
     this.usage.outputPerMillion = options?.outputPerMillion ?? null;
   }
   async write(field: GenerateField, signal?: AbortSignal) {
+    if (!this.allowed) privacyDenied("runtime writing");
     const o = this.options;
     if (!o?.enabled || !this.provider)
       throw new HarnessError(
@@ -73,8 +76,9 @@ export class FieldWriter {
         o.maxOutputTokens ?? 256,
         signal,
       );
-    } catch {
+    } catch (error) {
       this.usage.complete = false;
+      if (error instanceof HarnessError) throw error;
       throw new HarnessError(
         "CONTENT_PROVIDER_FAILED",
         "Writer request failed; no automatic retry, no fill dispatched",

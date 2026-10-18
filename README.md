@@ -4,6 +4,12 @@ End-to-end UI test harness: a list of natural-language steps becomes executable 
 
 The proof of concept includes a CLI, TypeScript API, browser adapter, executable scenarios, reports, and deterministic replay without a model. It includes a local HTTP API, an MCP server and authoring/recovery skills. It does not include a web editor or a multi-user service.
 
+## Corporate runners and agent pipelines
+
+Use `DUIT_PRIVACY_MODE=restricted` to minimize Jev context and retained evidence while disabling images, runtime writing and traces. Use `local` for explicit tests with no model calls. A case cannot weaken the runner's policy. `DUIT_MODEL_ALLOWED_ORIGINS` restricts the built-in model endpoints; redirects are never followed.
+
+Every run emits `agent-report.json`: stable failure codes, fingerprints, safe recovery instructions, mutation uncertainty, cleanup state and combined estimated cost. HTTP/MCP include the same compact outcome. See [corporate privacy and recovery](docs/corporate-privacy.md) for data flows, the actual TypeSafe commitments, configuration and limitations. No-training is not the same as zero data retention; DUIT cannot verify whether an account has an enterprise ZDR agreement.
+
 ## Quick start
 
 Requires Node.js 22 or later and a [TypeSafe](https://console.typesafe.ai) API key.

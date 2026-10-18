@@ -1,3 +1,4 @@
+import type { PrivacyPolicy } from "./privacy.js";
 import { literalCandidates } from "./input.js";
 import {
   HarnessError,
@@ -67,6 +68,7 @@ export class DecisionEngine {
     private provider: DecisionProvider,
     private policy: DecisionPolicy = defaultPolicy,
     private sanitize: (value: string) => string = (s) => s,
+    private privacy?: PrivacyPolicy,
   ) {}
   private async ask(
     phase: string,
@@ -393,15 +395,16 @@ export class DecisionEngine {
           tag: e.tag,
           role: e.role,
           name: e.name,
-          text: e.text,
+          text: this.privacy?.detailedArtifacts === false ? undefined : e.text,
           type: e.type,
           visible: e.visible,
           disabled: e.disabled,
           options: e.options,
-          context: e.context,
+          context:
+            this.privacy?.detailedArtifacts === false ? undefined : e.context,
           overlay: e.overlay,
           occluded: e.occluded,
-          href: e.href,
+          href: this.privacy?.detailedArtifacts === false ? undefined : e.href,
         },
       ]),
     );
@@ -413,8 +416,14 @@ export class DecisionEngine {
         step: step.text,
         operation: step.operation,
         url: observation.url,
-        title: observation.title,
-        dialogs: observation.dialogs,
+        title:
+          this.privacy?.detailedArtifacts === false
+            ? undefined
+            : observation.title,
+        dialogs:
+          this.privacy?.detailedArtifacts === false
+            ? undefined
+            : observation.dialogs,
         scope: step.scope,
         allowedAliases: step.aliases,
       },

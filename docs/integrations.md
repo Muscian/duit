@@ -63,3 +63,7 @@ node dist/cli.js validate examples/public/selenium-explicit.en.yaml
 Install the directories `skills/duit-authoring` and `skills/duit-recovery` in the skill location supported by your coding agent (for Codex, copy them into `~/.codex/skills/`). They teach the model to inspect unfamiliar apps through MCP, draft reproducible field values, validate cases, minimize model calls and recover without duplicating changes. They do not add another model to DUIT's runtime.
 
 A calling LLM can draft a `fill` value directly, or call `duit_materialize`. A separate runtime writer is available only when explicitly configured; see [visual targeting, writing and costs](visual-writing-costs.md).
+
+## Corporate policy and compact failure output
+
+Set `DUIT_PRIVACY_MODE=restricted` (or `local`) in the service/MCP process environment; submitted cases cannot weaken it. Add `DUIT_MODEL_ALLOWED_ORIGINS` for built-in provider egress. HTTP/MCP run summaries include `agent` and `privacy`; individual step results include a stable `failure` object. Read those before fetching full evidence. See [corporate privacy](corporate-privacy.md) for the contract, policy matrix and account-retention limitations.

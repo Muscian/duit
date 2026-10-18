@@ -23,9 +23,12 @@ export function browserService(artifactsRoot?: string) {
     (spec) =>
       new BrowserAdapter({
         ...spec.browser,
-        maskValues: Object.entries(resolveVariables(spec.variables))
-          .filter(([name]) => !spec.publicVariables?.includes(name))
-          .map(([, v]) => v),
+        maskValues: [
+          ...(spec.privacy?.redact ?? []),
+          ...Object.entries(resolveVariables(spec.variables))
+            .filter(([name]) => !spec.publicVariables?.includes(name))
+            .map(([, v]) => v),
+        ],
       }),
   );
   return new DuitService({

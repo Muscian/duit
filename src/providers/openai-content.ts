@@ -1,3 +1,8 @@
+import {
+  checkModelEndpoint,
+  resolvePrivacy,
+  privacyDenied,
+} from "../core/privacy.js";
 import "../load-env.js";
 import { fetch, EnvHttpProxyAgent } from "undici";
 import { z } from "zod";
@@ -21,6 +26,7 @@ export class OpenAIContentProvider implements ContentProvider {
         "CONTENT_PROVIDER_REQUIRED",
         "Configure DUIT_WRITER_ENDPOINT (full chat/completions URL), DUIT_WRITER_API_KEY and DUIT_WRITER_MODEL",
       );
+    checkModelEndpoint(this.options.endpoint);
     const u = new URL(this.options.endpoint);
     if (
       u.protocol !== "https:" &&
@@ -36,8 +42,10 @@ export class OpenAIContentProvider implements ContentProvider {
     maxOutputTokens: number,
     signal?: AbortSignal,
   ) {
+    if (!resolvePrivacy().writer) privacyDenied("runtime writing");
     const res = await fetch(this.options.endpoint, {
       method: "POST",
+      redirect: "manual",
       dispatcher: this.dispatcher,
       signal: AbortSignal.any([
         AbortSignal.timeout(30000),

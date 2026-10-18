@@ -1,3 +1,10 @@
+import {
+  resolvePrivacy,
+  privateProvider,
+  privateReport,
+  privateStep,
+} from "./privacy.js";
+import { describeFailure, updateFailureReport } from "./failures.js";
 import { FieldWriter, type ContentProvider } from "./content.js";
 import { MeteredProvider } from "./metering.js";
 import "../load-env.js";
@@ -42,6 +49,8 @@ export async function runCase(
   options: RunOptions,
 ): Promise<RunReport> {
   const spec = caseSchema.parse(input);
+  const privacy = resolvePrivacy(spec.privacy);
+  const screenshots = options.screenshots !== false && privacy.images;
   const artifactsDir = resolve(
     options.artifactsDir ??
       join(
@@ -53,9 +62,12 @@ export async function runCase(
   );
   // Unique destination prevents a failed run from leaving an old successful replay artifact.
   await mkdir(dirname(artifactsDir), { recursive: true });
-  await mkdir(artifactsDir, { recursive: false });
+  await mkdir(artifactsDir, { recursive: false, mode: 0o700 });
   const started = performance.now();
   const report: RunReport = {
+    privacy,
+    lifecycle: "open",
+    cleanupExpected: spec.cleanup?.length ?? 0,
     version: 1,
     name: spec.name,
     mode: options.replay ? "replay" : "live",
@@ -90,6 +102,7 @@ export async function runCase(
   };
   signal.addEventListener("abort", abort, { once: true });
   try {
+    options.platform.configurePrivacy?.(privacy);
     const variables = resolveVariables(spec.variables);
     sanitize = redactor(
       Object.fromEntries(
@@ -97,7 +110,12 @@ export async function runCase(
           ([name]) => !spec.publicVariables?.includes(name),
         ),
       ),
-      [process.env.JEV_API_KEY ?? "", process.env.DUIT_WRITER_API_KEY ?? ""],
+      [
+        process.env.JEV_API_KEY ?? "",
+        process.env.DUIT_WRITER_API_KEY ?? "",
+        ...(spec.privacy?.redact ?? []),
+      ],
+      !privacy.detailedArtifacts,
     );
     const policy = { ...defaultPolicy, ...options.policy };
     for (const [key, value] of Object.entries(policy))
@@ -115,7 +133,12 @@ export async function runCase(
       ? new MeteredProvider(options.provider, spec.costs)
       : undefined;
     engine = metered
-      ? new DecisionEngine(metered, policy, sanitize)
+      ? new DecisionEngine(
+          privateProvider(metered, privacy),
+          policy,
+          sanitize,
+          privacy,
+        )
       : undefined;
     const steps =
       options.replay?.actions ?? (await engine!.compile(spec.steps, signal));
@@ -127,26 +150,32 @@ export async function runCase(
     cleanupSteps = spec.cleanup?.length
       ? await engine!.compile(spec.cleanup, signal)
       : [];
-    writer = new FieldWriter(options.contentProvider, spec.content, sanitize);
+    writer = new FieldWriter(
+      options.contentProvider,
+      spec.content,
+      sanitize,
+      privacy.writer,
+    );
     report.interruptions = [];
     executor = new StepExecutor({
+      privacy,
       platform: options.platform,
       engine,
       variables,
       interruptions: options.replay ? undefined : spec.interruptions,
       visual: spec.visual,
       writer,
-      onVisualFrame:
-        options.screenshots === false
-          ? undefined
-          : async (frame) => {
-              const name = `visual-${frame.revision.slice(0, 12)}.png`;
-              await writeFile(
-                join(artifactsDir, name),
-                Buffer.from(frame.dataBase64, "base64"),
-              );
-              return name;
-            },
+      onVisualFrame: !screenshots
+        ? undefined
+        : async (frame) => {
+            const name = `visual-${frame.revision.slice(0, 12)}.png`;
+            await writeFile(
+              join(artifactsDir, name),
+              Buffer.from(frame.dataBase64, "base64"),
+              { mode: 0o600 },
+            );
+            return name;
+          },
       events: report.interruptions,
       readinessTimeoutMs: options.readinessTimeoutMs,
       onInterruptionAction: (action) => actions.push(action),
@@ -219,7 +248,7 @@ export async function runCase(
               : String(error),
         );
       } finally {
-        if (options.screenshots !== false && !signal.aborted) {
+        if (screenshots && !signal.aborted) {
           const filename = `step-${String(index + 1).padStart(3, "0")}.png`;
           try {
             await options.platform.capture(join(artifactsDir, filename));
@@ -236,7 +265,13 @@ export async function runCase(
             "RUN_CANCELLED: Run cancelled or exceeded its time budget";
         }
         result.durationMs = Math.round(performance.now() - start);
-        options.onStep?.(JSON.parse(sanitize(JSON.stringify(result))));
+        if (result.error) {
+          result.failure = describeFailure(result.error, result);
+          result.category = result.failure.category;
+        }
+        options.onStep?.(
+          JSON.parse(sanitize(JSON.stringify(privateStep(result, privacy)))),
+        );
       }
       if (result.status !== "passed") {
         report.status = result.status;
@@ -283,7 +318,7 @@ export async function runCase(
           if (report.status === "passed") report.status = "blocked";
         }
         result.durationMs = Math.round(performance.now() - start);
-        if (options.screenshots !== false) {
+        if (screenshots) {
           const filename = `cleanup-${index + 1}.png`;
           try {
             await options.platform.capture(join(artifactsDir, filename));
@@ -292,7 +327,13 @@ export async function runCase(
             report.warnings.push("Cleanup screenshot unavailable");
           }
         }
-        options.onCleanupStep?.(JSON.parse(sanitize(JSON.stringify(result))));
+        if (result.error) {
+          result.failure = describeFailure(result.error, result, "cleanup");
+          result.category = result.failure.category;
+        }
+        options.onCleanupStep?.(
+          JSON.parse(sanitize(JSON.stringify(privateStep(result, privacy)))),
+        );
         if (result.status !== "passed") break;
       }
     } else if (opened && cleanupSteps.length && signal.aborted) {
@@ -300,7 +341,7 @@ export async function runCase(
         "Cleanup was not executed because the browser was cancelled. Inspect the current resource state before rerunning.",
       );
     }
-    if (report.error && !signal.aborted && options.screenshots !== false) {
+    if (report.error && !signal.aborted && screenshots) {
       try {
         await options.platform.capture(join(artifactsDir, "startup.png"));
         report.screenshot = "startup.png";
@@ -332,8 +373,12 @@ export async function runCase(
           pricingSource: "No model used",
           complete: true,
         };
+    report.lifecycle = "closed";
+    updateFailureReport(report);
     await saveArtifacts(report, spec, actions, sanitize);
     await saveCheckpoint(report, sanitize, "closed");
   }
-  return JSON.parse(sanitize(JSON.stringify(report))) as RunReport;
+  return JSON.parse(
+    sanitize(JSON.stringify(privateReport(report))),
+  ) as RunReport;
 }

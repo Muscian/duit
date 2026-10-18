@@ -43,3 +43,18 @@ npm run duit -- run examples/canvas/case.en.yaml
 ```
 
 `test:public` is opt-in because it uses the network and bills Jev. The default test command skips public/live suites. Reports, masked screenshots, usage and eligible replay plans are stored in a new `artifacts/public-suite-*/` directory. A public site changing or becoming unavailable is a reportable result, not permission to weaken assertions. Visual targeting remains experimental and viewport-bound; these successes do not establish coverage for arbitrary poorly described tasks, inaccessible environments or hidden controls.
+
+## Corporate profiles 2026-10-18
+
+Live Chromium runs through DUIT against the public Selenium form, with no extra planning LLM:
+
+| Case/profile                              | Outcome            | Steps |  Time | Jev calls | Input tokens | Estimated USD |
+| ----------------------------------------- | ------------------ | ----: | ----: | --------: | -----------: | ------------: |
+| Natural-language form, standard           | PASSED             |     6 | 2.95s |         9 |        9,147 |  $0.000384174 |
+| Same form and steps, restricted           | PASSED             |     6 | 3.04s |         9 |        8,102 |  $0.000340284 |
+| Explicit form, local                      | PASSED             |     4 | 1.45s |         0 |            0 |            $0 |
+| Deliberately absent-text assertion, local | FAILED as expected |     1 | 1.68s |         0 |            0 |            $0 |
+
+The paired six-step case used 1,045 fewer input tokens (about **11.4%**) with restricted context. This is one fixture, not an estimate of savings across arbitrary applications; removing context may require more explicit instructions on other UIs. The four-step explicit case is shorter and is not a like-for-like comparison.
+
+The deliberate failure exited with status 1 and emitted `ASSERTION_FAILED`, phase `assert`, `investigate_assertion`, a stable fingerprint, `lifecycle: closed`, `cleanup: not_requested`, and zero estimated spend. It did not recommend replaying preceding actions. Restricted/local runs produced no screenshots or replay plan. Corporate tests also exercise permission modes, secret masking, redirect denial, image/writer/trace policy, interactive uncertainty and cleanup failure reporting. See [corporate privacy and recovery](corporate-privacy.md).

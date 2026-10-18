@@ -69,6 +69,13 @@ export const stepSchema = z.union([
 ]);
 export const caseSchema = z
   .object({
+    privacy: z
+      .object({
+        mode: z.enum(["standard", "restricted", "local"]).optional(),
+        redact: z.array(z.string().min(1).max(10000)).max(100).optional(),
+      })
+      .strict()
+      .optional(),
     name: z.string().trim().min(1).max(200),
     content: z
       .object({
@@ -233,10 +240,54 @@ export function substitute(
 export function redactor(
   variables: Record<string, string>,
   additional: string[] = [],
+  minimizeUrls = false,
 ) {
   const secrets = [...Object.values(variables), ...additional]
     .filter(Boolean)
+    .flatMap((s) => [
+      s,
+      encodeURIComponent(s),
+      new URLSearchParams({ value: s }).toString().slice(6),
+    ])
     .sort((a, b) => b.length - a.length);
-  return (value: string) =>
-    secrets.reduce((s, secret) => s.split(secret).join("[REDACTED]"), value);
+  const clean = (value: string) => {
+    let result = secrets.reduce(
+      (s, secret) => s.split(secret).join("[REDACTED]"),
+      value,
+    );
+    if (minimizeUrls)
+      result = result.replace(/https?:\/\/[^\s<>"']+/g, (url) => {
+        try {
+          return new URL(url).origin;
+        } catch {
+          return "[URL]";
+        }
+      });
+    return result;
+  };
+  return (value: string) => {
+    // Redact decoded JSON strings too: quotes, backslashes and newlines in secrets
+    // must neither evade masking nor corrupt a serialized report/request.
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (!parsed || typeof parsed !== "object") return clean(value);
+      const walk = (v: unknown): unknown =>
+        typeof v === "string"
+          ? clean(v)
+          : Array.isArray(v)
+            ? v.map(walk)
+            : v && typeof v === "object"
+              ? Object.fromEntries(
+                  Object.entries(v).map(([k, x]) => [k, walk(x)]),
+                )
+              : v;
+      return JSON.stringify(
+        walk(parsed),
+        null,
+        value.includes("\n") ? 2 : undefined,
+      );
+    } catch {
+      return clean(value);
+    }
+  };
 }

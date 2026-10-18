@@ -1,3 +1,8 @@
+import {
+  checkModelEndpoint,
+  resolvePrivacy,
+  privacyDenied,
+} from "../core/privacy.js";
 import "../load-env.js";
 import { randomUUID } from "node:crypto";
 import { fetch, EnvHttpProxyAgent } from "undici";
@@ -94,6 +99,7 @@ export class JevProvider implements DecisionProvider {
         "MISSING_API_KEY",
         "Set JEV_API_KEY before running live tests",
       );
+    checkModelEndpoint(this.options.endpoint);
     const url = new URL(this.options.endpoint);
     if (
       url.protocol !== "https:" &&
@@ -189,12 +195,16 @@ export class JevProvider implements DecisionProvider {
     signal?: AbortSignal,
     images = false,
   ): Promise<unknown> {
+    const privacy = resolvePrivacy();
+    if (!privacy.externalModels) privacyDenied("model requests");
+    if (images && !privacy.images) privacyDenied("image requests");
     for (let attempt = 0; attempt <= this.options.retries; attempt++) {
       signal?.throwIfAborted();
       let retryMs = Math.min(500 * 2 ** attempt, 5000);
       try {
         const res = await fetch(this.options.endpoint, {
           method: "POST",
+          redirect: "manual",
           dispatcher: this.dispatcher,
           signal: AbortSignal.any([
             AbortSignal.timeout(this.options.timeoutMs),

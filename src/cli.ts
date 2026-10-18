@@ -14,7 +14,7 @@ import { lazyWriter } from "./providers/openai-content.js";
 import { caseJsonSchema, validateCase } from "./core/authoring.js";
 import { BrowserAdapter, type BrowserOptions } from "./platforms/browser.js";
 
-const help = `duit — UI tests with Jev decisions and an optional field writer\n\n  npm run duit -- schema | validate case.yaml | serve | mcp\n  npm run duit -- run case.yaml [options]\n  npm run duit -- run steps.txt --base-url http://localhost:4173\n  npm run duit -- replay artifacts/<run>/replay.json [options]\n  npm run duit -- explore case.yaml [options]  # Retain browser after a blocked step\n\nOptions:\n  --visual              Enable experimental Jev screenshot click fallback\n  --max-requests N      Stop new Jev calls after this per-run limit\n  --max-cost-usd N      Stop new calls after reported spend reaches this estimate\n  --port N              Local API port (default 4318); DUIT_API_TOKEN sets bearer token\n  --base-url URL         Override starting URL (required for .txt/.md)\n  --out DIRECTORY       New artifact directory (must not already exist)\n  --browser NAME        chromium (default), firefox, webkit\n  --channel NAME        Chromium distribution: chrome, msedge, chromium (fresh session)\n  --allow-local-network-origin URL  Grant local-network access to this page origin; repeatable\n  --proxy URL           Override browser proxy; default inherits HTTP(S)_PROXY. Use "direct" to opt out\n  --headed              Show the browser\n  --timeout MS          Playwright action/assertion timeout (default 5000)\n  --navigation-timeout MS  Document and SPA readiness timeout (default 30000)\n  --budget MS           Whole-run deadline (default 300000)\n  --min-probability N    Decision threshold 0..1 (default 0.70)\n  --allow-origin URL    Allow additional navigation origin; repeatable\n  --storage-state FILE  Playwright authentication state\n  --trace               Record an unredacted Playwright trace (opt in)\n  --no-screenshots       Disable masked screenshots\n\nExit codes: 0 passed, 1 assertion/action failed, 2 blocked/configuration error.\n`;
+const help = `duit — UI tests with Jev decisions and an optional field writer\n\n  npm run duit -- schema | validate case.yaml | serve | mcp\n  npm run duit -- run case.yaml [options]\n  npm run duit -- run steps.txt --base-url http://localhost:4173\n  npm run duit -- replay artifacts/<run>/replay.json [options]\n  npm run duit -- explore case.yaml [options]  # Retain browser after a blocked step\n\nOptions:\n  --visual              Enable experimental Jev screenshot click fallback\n  --max-requests N      Stop new Jev calls after this per-run limit\n  --max-cost-usd N      Stop new calls after reported spend reaches this estimate\n  --port N              Local API port (default 4318); DUIT_API_TOKEN sets bearer token\n  --base-url URL         Override starting URL (required for .txt/.md)\n  --out DIRECTORY       New artifact directory (must not already exist)\n  --browser NAME        chromium (default), firefox, webkit\n  --channel NAME        Chromium distribution: chrome, msedge, chromium (fresh session)\n  --allow-local-network-origin URL  Grant local-network access to this page origin; repeatable\n  --proxy URL           Override browser proxy; default inherits HTTP(S)_PROXY. Use "direct" to opt out\n  --headed              Show the browser\n  --timeout MS          Playwright action/assertion timeout (default 5000)\n  --navigation-timeout MS  Document and SPA readiness timeout (default 30000)\n  --budget MS           Whole-run deadline (default 300000)\n  --min-probability N    Decision threshold 0..1 (default 0.70)\n  --allow-origin URL    Allow additional navigation origin; repeatable\n  --storage-state FILE  Playwright authentication state\n  --trace               Record an unredacted Playwright trace (opt in)\n  --no-screenshots       Disable masked screenshots\n\nCorporate policy: DUIT_PRIVACY_MODE=restricted|local; DUIT_MODEL_ALLOWED_ORIGINS=origin,...\n\nExit codes: 0 passed, 1 assertion/action failed, 2 blocked/configuration error.\n`;
 async function main() {
   const { values: v, positionals: p } = parseArgs({
     allowPositionals: true,
@@ -167,9 +167,12 @@ async function main() {
     allowedOrigins: v["allow-origin"] ?? spec.browser?.allowedOrigins,
     storageState: v["storage-state"],
     tracePath: v.trace ? join(out, "trace.zip") : undefined,
-    maskValues: Object.entries(resolveVariables(spec.variables))
-      .filter(([name]) => !spec.publicVariables?.includes(name))
-      .map(([, value]) => value),
+    maskValues: [
+      ...(spec.privacy?.redact ?? []),
+      ...Object.entries(resolveVariables(spec.variables))
+        .filter(([name]) => !spec.publicVariables?.includes(name))
+        .map(([, value]) => value),
+    ],
   });
   if (v.trace)
     console.log(
@@ -327,13 +330,17 @@ async function main() {
         ),
     });
     console.log(
-      `\n${report.status.toUpperCase()} · ${(report.durationMs / 1000).toFixed(2)}s · ${report.usage?.requests ?? report.decisions.length} Jev requests · estimated USD ${report.usage?.estimatedUsd?.toFixed(8) ?? "unknown"}\nReport: ${join(out, "report.html")}`,
+      `\n${report.status.toUpperCase()} · ${(report.durationMs / 1000).toFixed(2)}s · ${report.usage?.requests ?? report.decisions.length} Jev requests · estimated USD ${report.usage?.estimatedUsd?.toFixed(8) ?? "unknown"}\nReport: ${join(out, "report.html")}\nAgent report: ${join(out, "agent-report.json")}`,
     );
     if (report.contentUsage?.requests)
       console.log(
         `Writer: ${report.contentUsage.requests} calls · estimated USD ${report.contentUsage.estimatedUsd.toFixed(8)}${report.contentUsage.complete ? "" : " (incomplete usage)"}`,
       );
     if (report.error) console.error(report.error);
+    for (const failure of report.agent?.failures ?? [])
+      console.error(
+        `${failure.code} [${failure.category}]: ${failure.nextAction}`,
+      );
     process.exitCode =
       report.status === "passed" ? 0 : report.status === "failed" ? 1 : 2;
   } finally {

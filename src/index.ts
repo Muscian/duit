@@ -21,3 +21,6 @@ export * from "./services/browser-service.js";
 
 export * from "./core/content.js";
 export * from "./providers/openai-content.js";
+
+export * from "./core/privacy.js";
+export * from "./core/failures.js";
