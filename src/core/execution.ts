@@ -1,3 +1,4 @@
+import { incidentalControl } from "./interaction.js";
 import { privacyDenied, type PrivacyPolicy } from "./privacy.js";
 import type { FieldWriter } from "./content.js";
 import { DecisionEngine } from "./decisions.js";
@@ -7,6 +8,7 @@ import {
   pageOperations,
   type CompiledStep,
   type InterruptionRule,
+  type InteractionOptions,
   type Observation,
   type PlatformAdapter,
   type ResolvedAction,
@@ -63,6 +65,7 @@ export class StepExecutor {
   private handled = new Map<string, number>();
   private activeRules = new Set<string>();
   private signal?: AbortSignal;
+  private incidentalActions = 0;
   private compiledRules = new Map<string, CompiledStep>();
   constructor(
     private options: {
@@ -71,6 +74,7 @@ export class StepExecutor {
       engine?: DecisionEngine;
       variables: Record<string, string>;
       interruptions?: InterruptionRule[];
+      interaction?: InteractionOptions;
       visual?: VisualOptions;
       writer?: FieldWriter;
       onVisualFrame?: (frame: VisualFrame) => Promise<string>;
@@ -80,7 +84,7 @@ export class StepExecutor {
       beforeDispatch?: () => Promise<void>;
     },
   ) {
-    if (options.interruptions?.length)
+    if (options.interruptions?.length || options.interaction)
       options.platform.setInterruptionHandler?.(async () => {
         await this.interruptions(await this.inspect(this.signal), this.signal);
       });
@@ -134,10 +138,42 @@ export class StepExecutor {
     const { engine, platform, events } = this.options;
     let preparationRefreshes = 0;
     for (let total = 0; total < 20; total++) {
-      const rule = this.options.interruptions?.find(
-        (r) => !this.activeRules.has(r.name) && this.matches(r, observation),
+      const automatic = incidentalControl(
+        observation,
+        this.options.interaction,
       );
-      if (!rule) return observation;
+      const rule = automatic
+        ? {
+            name: `Configured ${automatic.category}`,
+            when: { text: automatic.control.name },
+            action: `Click ${automatic.control.name}`,
+            maxRuns: this.options.interaction?.maxActions ?? 10,
+          }
+        : this.options.interruptions?.find(
+            (r) =>
+              !this.activeRules.has(r.name) &&
+              this.matches(r, observation) &&
+              // A lower notice must not be selected while covered by another dialog.
+              (/^press (?:the )?["']?Escape["']?$/i.test(r.action) ||
+                observation.elements.some(
+                  (e) =>
+                    e.visible &&
+                    !e.occluded &&
+                    !e.disabled &&
+                    r.action.toLowerCase().includes(e.name.toLowerCase()) &&
+                    e.name.length > 0 &&
+                    /^(button|link)$/.test(e.role),
+                )),
+          );
+      if (!rule || this.activeRules.has(rule.name)) return observation;
+      if (
+        automatic &&
+        this.incidentalActions >= (this.options.interaction?.maxActions ?? 10)
+      )
+        throw new HarnessError(
+          "INTERRUPTION_LIMIT",
+          "Configured incidental action limit reached",
+        );
       this.activeRules.add(rule.name);
       try {
         if (!engine)
@@ -150,10 +186,24 @@ export class StepExecutor {
             "INTERRUPTION_LIMIT",
             `Notice ${rule.name} returned after its configured limit`,
           );
-        let step = this.compiledRules.get(rule.name);
+        let step = this.compiledRules.get(rule.action);
         if (!step) {
-          [step] = await engine.compile([rule.action], signal);
-          this.compiledRules.set(rule.name, step);
+          [step] = await engine.compile(
+            [
+              automatic
+                ? {
+                    instruction: rule.action,
+                    operation: "click",
+                    control: {
+                      name: automatic.control.name,
+                      role: automatic.control.role,
+                    },
+                  }
+                : rule.action,
+            ],
+            signal,
+          );
+          this.compiledRules.set(rule.action, step);
         }
         if (
           step.operation !== "click" &&
@@ -208,6 +258,7 @@ export class StepExecutor {
           signal?.throwIfAborted();
           // Count dispatch, not success: a notice click is never repeated after an uncertain result.
           this.handled.set(rule.name, (this.handled.get(rule.name) ?? 0) + 1);
+          if (automatic) this.incidentalActions++;
           await platform.execute(action);
           const deadline =
             Date.now() + (this.options.readinessTimeoutMs ?? 15000);
@@ -304,7 +355,11 @@ export class StepExecutor {
     }
     this.signal = signal;
     const { platform, engine, variables } = this.options;
-    if (step.scope && pageOperations.has(step.operation))
+    if (
+      step.scope &&
+      pageOperations.has(step.operation) &&
+      step.operation !== "assert_text_count"
+    )
       throw new HarnessError(
         "INVALID_SCOPE",
         "scope selects a target control; use context for page-wide assertions/navigation",
@@ -355,6 +410,7 @@ export class StepExecutor {
     let lastError: unknown;
     let fingerprint = "";
     let resolutions = 0;
+    let exactLabelDeadline: number | undefined;
     // Re-observe and re-resolve only before dispatch. Never retry an action here.
     do {
       signal?.throwIfAborted();
@@ -362,7 +418,8 @@ export class StepExecutor {
       if (
         !pageOperations.has(step.operation) ||
         step.context ||
-        this.options.interruptions?.length
+        this.options.interruptions?.length ||
+        this.options.interaction
       ) {
         result.phase = "context";
         observation = await this.interruptions(
@@ -391,6 +448,10 @@ export class StepExecutor {
       }
       fingerprint = nextFingerprint;
       try {
+        exactLabelDeadline ??=
+          Date.now() +
+          (this.options.interaction?.exactLabelWaitMs ??
+            (this.options.interaction?.profile === "test" ? 5000 : 0));
         const resolved =
           (step.visual === "only" ? await visualResolve() : replay) ??
           (await engine!.resolve(
@@ -408,11 +469,17 @@ export class StepExecutor {
             },
             observation,
             signal,
+            { semantic: Date.now() >= exactLabelDeadline },
           ));
         action = { ...resolved, text: step.text };
         break;
       } catch (error) {
         lastError = error;
+        if (error instanceof HarnessError && error.code === "LABEL_NOT_READY") {
+          await pause(signal);
+          fingerprint = ""; // Re-check the literal binding without another model call.
+          continue;
+        }
         if (
           visualEnabled &&
           error instanceof HarnessError &&
@@ -561,6 +628,32 @@ export class StepExecutor {
     try {
       await platform.execute(resolved);
     } catch (error) {
+      // A notice may mount after the initial snapshot. Retry only this read-only
+      // assertion after a newly handled, completed notice; never replay the action
+      // which preceded it. Preserve the failed observation in the step report.
+      if (
+        result.phase === "assert" &&
+        engine &&
+        !replay &&
+        (this.options.interaction || this.options.interruptions?.length) &&
+        failureCategory(error) !== "environment" &&
+        (result.assertionRecoveries?.length ?? 0) < 3
+      ) {
+        const before = this.options.events.length;
+        const observation = await this.interruptions(
+          await this.inspect(signal),
+          signal,
+        );
+        result.evidence = evidence(observation);
+        const notices = this.options.events.slice(before);
+        if (notices.length && notices.every((e) => e.status === "passed")) {
+          (result.assertionRecoveries ??= []).push({
+            error: error instanceof Error ? error.message : String(error),
+            notices: notices.map((e) => e.name),
+          });
+          return this.perform(step, result, signal, replay);
+        }
+      }
       if (result.phase === "dispatch")
         throw new HarnessError(
           "ACTION_OUTCOME_UNKNOWN",

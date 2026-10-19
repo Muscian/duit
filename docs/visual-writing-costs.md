@@ -38,7 +38,7 @@ Cheapest/reproducible path: let the user's authoring model write `value` once. E
   value: Synthetic note prepared during authoring.
 ```
 
-Natural-language steps remain supported, and a case can mix both forms. Explicit operation/value metadata is authoritative; its prose should describe the same operation. Name/role matching still requires exactly one compatible observed control. `assert_nonempty` measures non-whitespace field content; it does not evaluate whether generated prose is correct.
+Natural-language steps remain supported, and a case can mix both forms. Explicit operation/value metadata is authoritative; its prose should describe the same operation. A unique name/role match binds directly. Repeated exact names constrain Jev to those matching controls; missing explicit names never select a different label. `assert_nonempty` measures non-whitespace field content; it does not evaluate whether generated prose is correct.
 
 For optional runtime generation, configure an OpenAI-compatible **chat completions** writer:
 

@@ -1,0 +1,259 @@
+{
+  "name": "AWS-02: AWS stage picker for CORS, IP Allowlist and Header Injection",
+  "baseUrl": "https://test1.platform.mulesoft.com/login/signin?",
+  "browser": {
+    "allowedOrigins": ["https://test1.omni.mulesoft.com"],
+    "timeoutMs": 15000,
+    "navigationTimeoutMs": 120000
+  },
+  "interaction": {
+    "profile": "test",
+    "maxActions": 15
+  },
+  "decisionContext": "Authorized Test1 UI validation. Configure policy drafts, inspect AWS target stages, select one stage, then cancel and discard the draft. Never click the final Apply policy action.",
+  "variables": {
+    "USERNAME": "env:MULESOFT_USERNAME",
+    "PASSWORD": "env:MULESOFT_PASSWORD",
+    "API_NAME": "CorsTestApi",
+    "STAGE_ID": "431c1fd8-c264-41c0-9310-d31334041015"
+  },
+  "steps": [
+    "Enter \"${USERNAME}\" in Username",
+    "Enter \"${PASSWORD}\" in Password",
+    "Click Sign in",
+    "Verify the text \"Management Center\" is visible",
+    {
+      "instruction": "Click Switch to enhanced",
+      "aliases": ["Switch to enhanced - Opens a new window"]
+    },
+    {
+      "instruction": "Click Governance Strategies",
+      "context": {
+        "text": "Portfolio Overview",
+        "urlIncludes": "https://test1.omni.mulesoft.com/"
+      }
+    },
+    "Verify the text \"Active Strategies\" is visible",
+    "Click Add Strategy",
+    {
+      "instruction": "Click Apply Policy",
+      "aliases": [
+        "Apply Policy Select and apply a policy to one or more services — globally or to specific instances."
+      ]
+    },
+    {
+      "instruction": "Verify six Open policies are ready",
+      "operation": "assert_text_count",
+      "value": "Open",
+      "count": 6,
+      "scope": "Open: Works across all gateways",
+      "wait": {
+        "timeoutMs": 120000,
+        "intervalMs": 1000
+      }
+    },
+    {
+      "instruction": "Click Select Cross-Origin Resource Sharing",
+      "scope": "Open: Works across all gateways"
+    },
+    "Click Next",
+    "Verify the text \"Amazon API Gateway\" is visible",
+    {
+      "instruction": "Verify Next is enabled",
+      "operation": "assert_enabled",
+      "control": {
+        "name": "Next",
+        "role": "button"
+      }
+    },
+    "Click Next",
+    "Verify the text \"Define Application Scope\" is visible",
+    "Verify the text \"Amazon\" is visible",
+    "Click \"${API_NAME}\"",
+    "Verify the text \"prod\" is visible",
+    "Verify the text \"${STAGE_ID}\" is visible",
+    {
+      "instruction": "Verify the fixture stage is selectable",
+      "operation": "assert_enabled",
+      "control": {
+        "name": "${STAGE_ID}",
+        "role": "checkbox"
+      }
+    },
+    {
+      "instruction": "Select the fixture stage",
+      "operation": "check",
+      "control": {
+        "name": "${STAGE_ID}",
+        "role": "checkbox"
+      }
+    },
+    {
+      "instruction": "Verify the fixture stage is selected",
+      "operation": "assert_checked",
+      "control": {
+        "name": "${STAGE_ID}",
+        "role": "checkbox"
+      }
+    },
+    "Click Cancel",
+    "Verify the text \"Active Strategies\" is visible",
+    "Click Add Strategy",
+    {
+      "instruction": "Click Apply Policy",
+      "aliases": [
+        "Apply Policy Select and apply a policy to one or more services — globally or to specific instances."
+      ]
+    },
+    {
+      "instruction": "Verify six Open policies are ready",
+      "operation": "assert_text_count",
+      "value": "Open",
+      "count": 6,
+      "scope": "Open: Works across all gateways",
+      "wait": {
+        "timeoutMs": 120000,
+        "intervalMs": 1000
+      }
+    },
+    {
+      "instruction": "Click Select IP allowlist",
+      "scope": "Open: Works across all gateways"
+    },
+    "Click Next",
+    "Verify the text \"Amazon API Gateway\" is visible",
+    "Enter \"192.0.2.0/24\" in Allowlist",
+    {
+      "instruction": "Commit the Allowlist entry",
+      "operation": "press",
+      "value": "Enter",
+      "control": {
+        "name": "Allowlist",
+        "role": "textbox"
+      }
+    },
+    {
+      "instruction": "Verify Next is enabled",
+      "operation": "assert_enabled",
+      "control": {
+        "name": "Next",
+        "role": "button"
+      }
+    },
+    "Click Next",
+    "Verify the text \"Define Application Scope\" is visible",
+    "Verify the text \"Amazon\" is visible",
+    "Click \"${API_NAME}\"",
+    "Verify the text \"prod\" is visible",
+    "Verify the text \"${STAGE_ID}\" is visible",
+    {
+      "instruction": "Verify the fixture stage is selectable",
+      "operation": "assert_enabled",
+      "control": {
+        "name": "${STAGE_ID}",
+        "role": "checkbox"
+      }
+    },
+    {
+      "instruction": "Select the fixture stage",
+      "operation": "check",
+      "control": {
+        "name": "${STAGE_ID}",
+        "role": "checkbox"
+      }
+    },
+    {
+      "instruction": "Verify the fixture stage is selected",
+      "operation": "assert_checked",
+      "control": {
+        "name": "${STAGE_ID}",
+        "role": "checkbox"
+      }
+    },
+    "Click Cancel",
+    "Verify the text \"Active Strategies\" is visible",
+    "Click Add Strategy",
+    {
+      "instruction": "Click Apply Policy",
+      "aliases": [
+        "Apply Policy Select and apply a policy to one or more services — globally or to specific instances."
+      ]
+    },
+    {
+      "instruction": "Verify six Open policies are ready",
+      "operation": "assert_text_count",
+      "value": "Open",
+      "count": 6,
+      "scope": "Open: Works across all gateways",
+      "wait": {
+        "timeoutMs": 120000,
+        "intervalMs": 1000
+      }
+    },
+    {
+      "instruction": "Click Select Header Injection",
+      "scope": "Open: Works across all gateways"
+    },
+    "Click Next",
+    "Verify the text \"Amazon API Gateway\" is visible",
+    "Click Add Inbound Header Injection",
+    "Click Add Outbound Header Injection",
+    {
+      "instruction": "Enter \"X-Backend-Source\" in Key",
+      "scope": "Inbound Header Injection"
+    },
+    {
+      "instruction": "Enter \"duit-ui-probe\" in Value",
+      "scope": "Inbound Header Injection"
+    },
+    {
+      "instruction": "Enter \"X-Served-By\" in Key",
+      "scope": "Outbound Header Injection"
+    },
+    {
+      "instruction": "Enter \"duit-ui-probe\" in Value",
+      "scope": "Outbound Header Injection"
+    },
+    {
+      "instruction": "Verify Next is enabled",
+      "operation": "assert_enabled",
+      "control": {
+        "name": "Next",
+        "role": "button"
+      }
+    },
+    "Click Next",
+    "Verify the text \"Define Application Scope\" is visible",
+    "Verify the text \"Amazon\" is visible",
+    "Click \"${API_NAME}\"",
+    "Verify the text \"prod\" is visible",
+    "Verify the text \"${STAGE_ID}\" is visible",
+    {
+      "instruction": "Verify the fixture stage is selectable",
+      "operation": "assert_enabled",
+      "control": {
+        "name": "${STAGE_ID}",
+        "role": "checkbox"
+      }
+    },
+    {
+      "instruction": "Select the fixture stage",
+      "operation": "check",
+      "control": {
+        "name": "${STAGE_ID}",
+        "role": "checkbox"
+      }
+    },
+    {
+      "instruction": "Verify the fixture stage is selected",
+      "operation": "assert_checked",
+      "control": {
+        "name": "${STAGE_ID}",
+        "role": "checkbox"
+      }
+    },
+    "Click Cancel",
+    "Verify the text \"Active Strategies\" is visible"
+  ],
+  "publicVariables": ["API_NAME", "STAGE_ID"]
+}

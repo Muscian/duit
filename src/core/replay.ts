@@ -40,12 +40,18 @@ const actionSchema = z
       ],
     ),
     value: z.string().max(10000).optional(),
+    count: z.number().int().min(0).max(10000).optional(),
     literalValue: z.boolean().optional(),
     target: locatorSchema.optional(),
     resolution: z.enum(["exact-label", "unique-role", "jev"]).optional(),
   })
   .strict()
   .superRefine((a, ctx) => {
+    if ((a.operation === "assert_text_count") !== (a.count !== undefined))
+      ctx.addIssue({
+        code: "custom",
+        message: "Only assert_text_count requires a count",
+      });
     if (a.wait && !a.operation.startsWith("assert_"))
       ctx.addIssue({
         code: "custom",

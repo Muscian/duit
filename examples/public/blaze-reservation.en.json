@@ -1,0 +1,59 @@
+{
+  "interaction": {
+    "profile": "test"
+  },
+  "browser": {
+    "timeoutMs": 15000,
+    "navigationTimeoutMs": 60000
+  },
+  "costs": {
+    "maxRequests": 45,
+    "maxUsd": 0.02
+  },
+  "name": "BlazeDemo: route search, flight selection and demo reservation",
+  "baseUrl": "https://blazedemo.com/",
+  "steps": [
+    {
+      "instruction": "Select Boston as departure city",
+      "operation": "select",
+      "scope": "departure",
+      "value": "Boston"
+    },
+    {
+      "instruction": "Select Berlin as destination city",
+      "operation": "select",
+      "scope": "destination",
+      "value": "Berlin"
+    },
+    "Click Find Flights",
+    "Verify the text \"Flights from Boston to Berlin:\" is visible",
+    {
+      "instruction": "Choose the flight numbered 43",
+      "operation": "click",
+      "scope": "43",
+      "control": {
+        "name": "Choose This Flight",
+        "role": "button"
+      }
+    },
+    "Enter \"DUIT Demo Passenger\" in Name",
+    "Enter \"123 Test Street\" in Address",
+    "Enter \"Test City\" in City",
+    "Enter \"Test State\" in State",
+    "Enter \"12345\" in Zip Code",
+    {
+      "instruction": "Choose Visa card type",
+      "operation": "select",
+      "value": "Visa",
+      "scope": "Card Type"
+    },
+    "Enter \"4111111111111111\" in Credit Card Number",
+    "Enter \"12\" in Month",
+    "Enter \"2030\" in Year",
+    "Enter \"DUIT Demo Passenger\" in Name on Card",
+    "Click Purchase Flight",
+    "Verify the text \"Thank you for your purchase today!\" is visible",
+    "Verify the text \"Status\" is visible",
+    "Verify the text \"PendingCapture\" is visible"
+  ]
+}

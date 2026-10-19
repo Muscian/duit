@@ -27,7 +27,8 @@
     "format:check": "prettier --check src tests examples docs skills README.md *.json .github/workflows/*.yml",
     "test:mulesoft": "DUIT_MULESOFT_LIVE=1 tsx --test tests/mulesoft.test.ts",
     "test:public": "DUIT_PUBLIC_LIVE=1 tsx --test tests/public.test.ts",
-    "demo:canvas": "tsx examples/canvas/server.ts"
+    "demo:canvas": "tsx examples/canvas/server.ts",
+    "test:workflows": "DUIT_WORKFLOW_LIVE=1 tsx --test tests/workflows.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

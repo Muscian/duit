@@ -17,3 +17,9 @@ Use the current session ID. A checkpoint is evidence, not an action script. Do n
 8. Finish through `duit_session_close` so configured cleanup runs. Cancellation shuts down the browser and may prevent cleanup; inspect the actual resource in a later authorized recovery session before creating anything again.
 
 CLI equivalents: `explore`, `:inspect`, `:screenshot`, `:retry`, `:confirm`, `:continue`, `:finish`. Only the running interactive session retains the browser. DUIT does not reconnect to a browser after its process has exited.
+
+For configured `interaction` profiles, inspect recorded `Configured cookies/onboarding/reminders` events before changing prompts. Missing targets can be covered by hidden command-palette duplicates or delayed catalog loading; report the evidence and fix reusable harness behavior rather than adding synonyms. Preserve the current browser; CLI `explore` closes on EOF. If a notice action is dispatched but its outcome is unknown, the profile must not repeat it automatically.
+
+The harness can recover a late configured notice after a read-only assertion fails. Inspect `step.assertionRecoveries` and interruption events first: the prior action is not repeated. Each recovery retains the original assertion error and notice names; unknown notice dispatch outcomes still stop the session. Do not rerun the whole case to handle an incidental dialog.
+
+For public sites, blocked third-party subframes can coexist with a healthy main page; inspect frame/resource diagnostics before classifying the application as unavailable. A nonmodal dialog must not suppress an exposed confirmation elsewhere. Prefer fixes to shared observation/context rules over application-specific selectors or lower confidence gates. Native alerts and server-side asynchronous completion are not DOM text: do not claim a click or a generic wait verifies them.

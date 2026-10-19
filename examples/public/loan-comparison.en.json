@@ -1,0 +1,127 @@
+{
+  "name": "Loan calculator: zero interest, compound maturity and bond discount",
+  "baseUrl": "https://www.calculator.net/loan-calculator.html",
+  "interaction": {
+    "profile": "test"
+  },
+  "browser": {
+    "timeoutMs": 15000,
+    "navigationTimeoutMs": 60000
+  },
+  "costs": {
+    "maxRequests": 40,
+    "maxUsd": 0.02
+  },
+  "steps": [
+    {
+      "instruction": "Enter \"1200\" in Loan Amount",
+      "operation": "fill",
+      "value": "1200",
+      "scope": "Amortized Loan: Paying Back a Fixed Amount Periodically"
+    },
+    {
+      "instruction": "Enter \"0\" in Interest Rate",
+      "operation": "fill",
+      "value": "0",
+      "scope": "Amortized Loan: Paying Back a Fixed Amount Periodically"
+    },
+    {
+      "instruction": "Calculate the Amortized Loan: Paying Back a Fixed Amount Periodically",
+      "operation": "click",
+      "control": {
+        "name": "Calculate",
+        "role": "button"
+      },
+      "scope": "Amortized Loan: Paying Back a Fixed Amount Periodically"
+    },
+    {
+      "instruction": "Verify the text \"$10.00\" is visible",
+      "operation": "assert_text",
+      "value": "$10.00"
+    },
+    {
+      "instruction": "Verify the text \"Total of 120 Payments\" is visible",
+      "operation": "assert_text",
+      "value": "Total of 120 Payments"
+    },
+    {
+      "instruction": "Verify the text \"$0.00\" is visible",
+      "operation": "assert_text",
+      "value": "$0.00"
+    },
+    {
+      "instruction": "Enter \"1000\" in Loan Amount",
+      "operation": "fill",
+      "value": "1000",
+      "scope": "Deferred Payment Loan: Paying Back a Lump Sum Due at Maturity"
+    },
+    {
+      "instruction": "Enter \"10\" in Interest Rate",
+      "operation": "fill",
+      "value": "10",
+      "scope": "Deferred Payment Loan: Paying Back a Lump Sum Due at Maturity"
+    },
+    {
+      "instruction": "Select annual compounding",
+      "operation": "select",
+      "value": "Annually (APY)",
+      "scope": "Deferred Payment Loan: Paying Back a Lump Sum Due at Maturity"
+    },
+    {
+      "instruction": "Calculate the Deferred Payment Loan: Paying Back a Lump Sum Due at Maturity",
+      "operation": "click",
+      "control": {
+        "name": "Calculate",
+        "role": "button"
+      },
+      "scope": "Deferred Payment Loan: Paying Back a Lump Sum Due at Maturity"
+    },
+    {
+      "instruction": "Verify the text \"$2,593.74\" is visible",
+      "operation": "assert_text",
+      "value": "$2,593.74"
+    },
+    {
+      "instruction": "Verify the text \"$1,593.74\" is visible",
+      "operation": "assert_text",
+      "value": "$1,593.74"
+    },
+    {
+      "instruction": "Enter \"1000\" in Predetermined Due Amount",
+      "operation": "fill",
+      "value": "1000",
+      "scope": "Bond: Paying Back a Predetermined Amount Due at Loan Maturity"
+    },
+    {
+      "instruction": "Enter \"10\" in Interest Rate",
+      "operation": "fill",
+      "value": "10",
+      "scope": "Bond: Paying Back a Predetermined Amount Due at Loan Maturity"
+    },
+    {
+      "instruction": "Select annual compounding",
+      "operation": "select",
+      "value": "Annually (APY)",
+      "scope": "Bond: Paying Back a Predetermined Amount Due at Loan Maturity"
+    },
+    {
+      "instruction": "Calculate the Bond: Paying Back a Predetermined Amount Due at Loan Maturity",
+      "operation": "click",
+      "control": {
+        "name": "Calculate",
+        "role": "button"
+      },
+      "scope": "Bond: Paying Back a Predetermined Amount Due at Loan Maturity"
+    },
+    {
+      "instruction": "Verify the text \"$385.54\" is visible",
+      "operation": "assert_text",
+      "value": "$385.54"
+    },
+    {
+      "instruction": "Verify the text \"$614.46\" is visible",
+      "operation": "assert_text",
+      "value": "$614.46"
+    }
+  ]
+}

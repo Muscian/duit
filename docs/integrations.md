@@ -67,3 +67,9 @@ A calling LLM can draft a `fill` value directly, or call `duit_materialize`. A s
 ## Corporate policy and compact failure output
 
 Set `DUIT_PRIVACY_MODE=restricted` (or `local`) in the service/MCP process environment; submitted cases cannot weaken it. Add `DUIT_MODEL_ALLOWED_ORIGINS` for built-in provider egress. HTTP/MCP run summaries include `agent` and `privacy`; individual step results include a stable `failure` object. Read those before fetching full evidence. See [corporate privacy](corporate-privacy.md) for the contract, policy matrix and account-retention limitations.
+
+## Configure a new environment once
+
+Cases accepted by CLI, HTTP and MCP share `interaction` and `decisionContext`. `interaction: {profile: "test"}` accepts recognized cookies, dismisses onboarding, defers reminders and discards unsaved test drafts; use individual overrides for different preferences. The default is manual. `decisionContext` supplies redacted domain vocabulary to Jev and cannot override explicit operations, values, name constraints, assertions or origin restrictions. See [runtime authoring](runtime-authoring.md#reusable-test-interaction-profile).
+
+Inspection controls include unnamed elements, duplicate-label context, placeholders and bounded select options. Full sanitized observations are persisted. A named generic DOM region may be clicked even when the application omitted button semantics; Playwright still checks actionability, and deterministic assertions establish the result.

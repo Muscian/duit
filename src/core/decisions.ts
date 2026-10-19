@@ -69,6 +69,7 @@ export class DecisionEngine {
     private policy: DecisionPolicy = defaultPolicy,
     private sanitize: (value: string) => string = (s) => s,
     private privacy?: PrivacyPolicy,
+    private decisionContext?: string,
   ) {}
   private async ask(
     phase: string,
@@ -78,7 +79,15 @@ export class DecisionEngine {
   ) {
     const start = performance.now();
     const request = {
-      state: JSON.parse(this.sanitize(JSON.stringify(state))),
+      state: JSON.parse(
+        this.sanitize(
+          JSON.stringify(
+            this.decisionContext
+              ? { context: this.decisionContext, ...(state as object) }
+              : state,
+          ),
+        ),
+      ),
       questions: JSON.parse(this.sanitize(JSON.stringify(questions))),
     };
     const response = await this.provider.decide(
@@ -98,6 +107,36 @@ export class DecisionEngine {
     input: StepInstruction[],
     signal?: AbortSignal,
   ): Promise<CompiledStep[]> {
+    // Parse only unambiguous atomic grammar. Unfamiliar prose still uses Jev.
+    const canonical = input.map((source) => {
+      const t = typeof source === "string" ? source : source.instruction;
+      const structure = t.replace(/"[^"\n]*"|'[^'\n]*'/g, "VALUE");
+      if (/\b(?:and|then|y luego)\b/i.test(structure)) return undefined;
+      if (/^(?:navigate|go) to (?:"[^"\n]+"|'[^'\n]+')[.!]?$/i.test(t))
+        return "goto" as const;
+      if (
+        /^verify (?:the )?text (?:"[^"\n]+"|'[^'\n]+') is (?:not )?visible[.!]?$/i.test(
+          t,
+        )
+      )
+        return / is not visible[.!]?$/i.test(t)
+          ? ("assert_no_text" as const)
+          : ("assert_text" as const);
+      if (
+        /^(?:enter|type|fill) (?:"[^"\n]*"|'[^'\n]*') (?:in|into) .+$/i.test(t)
+      )
+        return "fill" as const;
+      // Quoted labels can contain conjunctions; unquoted compound prose uses Jev.
+      if (
+        /^click .+$/i.test(t) &&
+        !/\b(?:and|then) (?:click|fill|enter|verify|check)\b/i.test(t)
+      )
+        return "click" as const;
+      return undefined;
+    });
+    const inferred = input.map((s, i) =>
+      typeof s !== "string" && s.operation ? s.operation : canonical[i],
+    );
     const steps = input.map((s) => (typeof s === "string" ? s : s.instruction));
     const result: CompiledStep[] = [];
     // Batches keep the per-question and total context bounded for long cases.
@@ -105,8 +144,7 @@ export class DecisionEngine {
       const batch = steps.slice(offset, offset + 8);
       const questions = Object.fromEntries(
         batch.flatMap((step, i) =>
-          typeof input[offset + i] !== "string" &&
-          (input[offset + i] as Exclude<StepInstruction, string>).operation
+          inferred[offset + i]
             ? []
             : [
                 [
@@ -125,7 +163,7 @@ export class DecisionEngine {
       for (const [i, text] of batch.entries()) {
         const source = input[offset + i];
         const op =
-          (typeof source === "string" ? undefined : source.operation) ??
+          inferred[offset + i] ??
           gate(
             answers[`step${i}`],
             this.policy,
@@ -141,6 +179,7 @@ export class DecisionEngine {
             ? {}
             : {
                 context: source.context,
+                count: source.count,
                 value: source.value,
                 generate: source.generate,
                 control: source.control,
@@ -157,7 +196,15 @@ export class DecisionEngine {
         result.push({ ...metadata, text, operation: op as Operation });
       }
     }
-    for (const step of result) {
+    for (const [index, step] of result.entries()) {
+      if (
+        (step.operation === "assert_text_count") !==
+        (step.count !== undefined)
+      )
+        throw new HarnessError(
+          "INVALID_COUNT",
+          "Only assert_text_count requires a count",
+        );
       if (step.generate) {
         if (step.operation !== "fill" || step.value !== undefined)
           throw new HarnessError(
@@ -180,6 +227,11 @@ export class DecisionEngine {
         continue;
       }
       if (!valueOperations.has(step.operation)) continue;
+      const quoted = step.text.match(/"([^"\n]*)"|'([^'\n]*)'/);
+      if (canonical[index] === step.operation && quoted) {
+        step.value = quoted[1] ?? quoted[2];
+        continue;
+      }
       const literals = literalCandidates(step.text);
       const criteria = Object.fromEntries(literals.map((v, i) => [`v${i}`, v]));
       criteria.none =
@@ -285,9 +337,10 @@ export class DecisionEngine {
     step: CompiledStep,
     observation?: Observation,
     signal?: AbortSignal,
+    options: { semantic?: boolean } = {},
   ): Promise<ResolvedAction> {
     if (pageOperations.has(step.operation)) {
-      if (step.scope)
+      if (step.scope && step.operation !== "assert_text_count")
         throw new HarnessError(
           "INVALID_SCOPE",
           "scope selects a target control; use context for page-wide text/URL assertions and navigation",
@@ -329,17 +382,38 @@ export class DecisionEngine {
         };
     }
     if (step.control) {
-      const exact = elements.filter(
+      let exact = elements.filter(
         (e) =>
           e.name === step.control!.name &&
           (!step.control!.role || e.role === step.control!.role),
       );
-      if (exact.length !== 1)
+      const exposed = exact.filter((e) => !e.occluded);
+      if (exposed.length) exact = exposed;
+      if (!exact.length)
         throw new HarnessError(
           "NO_TARGET",
           `Expected one ${step.control.role ?? "control"} named ${step.control.name}; found ${exact.length}`,
         );
-      return { ...step, target: exact[0].locator, resolution: "exact-label" };
+      if (exact.length === 1)
+        return { ...step, target: exact[0].locator, resolution: "exact-label" };
+      // Explicit metadata constrains the candidate set. Natural intent can
+      // distinguish repeated controls, without ever selecting a different name.
+      elements = exact;
+    }
+    if (step.operation === "fill") {
+      const label = step.text.match(
+        /^(?:enter|type|fill) (?:"[^"\n]*"|'[^'\n]*') (?:in|into) (?:the )?(.+?)[.!]?$/i,
+      )?.[1];
+      const exact = label
+        ? elements.filter((e) => e.name.toLowerCase() === label.toLowerCase())
+        : [];
+      if (exact.length === 1)
+        return { ...step, target: exact[0].locator, resolution: "exact-label" };
+      if (label && !exact.length && options.semantic === false)
+        throw new HarnessError(
+          "LABEL_NOT_READY",
+          "Waiting for an exact observed fill label before semantic interpretation",
+        );
     }
     // An explicit, unique observed label needs no probabilistic target decision.
     // Semantic descriptions without an exact name retain the complete eligible set.
@@ -363,11 +437,22 @@ export class DecisionEngine {
         const labels = [raw, label, ...(step.aliases ?? [])].map((s) =>
           s.toLowerCase(),
         );
-        const exact = elements.filter((e) =>
+        let exact = elements.filter((e) =>
           labels.includes(e.name.toLowerCase()),
         );
+        // Covered duplicates must not compete with an exposed exact label.
+        // A sole covered label still reaches trial actionability, which can scroll
+        // clipped controls into view without dispatching a click.
+        const exposed = exact.filter((e) => !e.occluded);
+        if (exposed.length) exact = exposed;
         const byRole = role ? exact.filter((e) => e.role === role) : [];
+        if (!exact.length && options.semantic === false)
+          throw new HarnessError(
+            "LABEL_NOT_READY",
+            "Waiting for an exact observed click label before semantic interpretation",
+          );
         if (exact.length) {
+          // Prefer a uniquely unobstructed exact label over a covered duplicate.
           elements = byRole.length ? byRole : exact;
           if (elements.length === 1)
             return {
@@ -480,6 +565,7 @@ export function compatible(op: Operation, el: ElementCandidate): boolean {
         "option",
         "switch",
         "combobox",
+        "generic",
       ].includes(el.role) || el.tag === "summary"
     );
   return true;

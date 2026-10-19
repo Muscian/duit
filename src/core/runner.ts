@@ -138,6 +138,7 @@ export async function runCase(
           policy,
           sanitize,
           privacy,
+          spec.decisionContext,
         )
       : undefined;
     const steps =
@@ -163,6 +164,7 @@ export async function runCase(
       engine,
       variables,
       interruptions: options.replay ? undefined : spec.interruptions,
+      interaction: options.replay ? undefined : spec.interaction,
       visual: spec.visual,
       writer,
       onVisualFrame: !screenshots

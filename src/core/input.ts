@@ -41,6 +41,7 @@ export const stepSchema = z.union([
         )
         .optional(),
       value: z.string().max(10000).optional(),
+      count: z.number().int().min(0).max(10000).optional(),
       control: z
         .object({
           name: z.string().min(1).max(500),
@@ -69,6 +70,19 @@ export const stepSchema = z.union([
 ]);
 export const caseSchema = z
   .object({
+    interaction: z
+      .object({
+        profile: z.enum(["manual", "test"]).optional(),
+        cookies: z.enum(["manual", "accept", "reject"]).optional(),
+        onboarding: z.enum(["manual", "dismiss"]).optional(),
+        reminders: z.enum(["manual", "later"]).optional(),
+        unsavedChanges: z.enum(["manual", "discard"]).optional(),
+        maxActions: z.number().int().min(1).max(30).optional(),
+        exactLabelWaitMs: z.number().int().min(0).max(30000).optional(),
+      })
+      .strict()
+      .optional(),
+    decisionContext: z.string().trim().min(1).max(2000).optional(),
     privacy: z
       .object({
         mode: z.enum(["standard", "restricted", "local"]).optional(),

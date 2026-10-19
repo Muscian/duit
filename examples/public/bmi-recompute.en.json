@@ -1,0 +1,60 @@
+{
+  "interaction": {
+    "profile": "test"
+  },
+  "browser": {
+    "timeoutMs": 15000,
+    "navigationTimeoutMs": 60000
+  },
+  "costs": {
+    "maxRequests": 40,
+    "maxUsd": 0.02
+  },
+  "name": "BMI calculator: recomputation, stale-result exclusion and reset",
+  "baseUrl": "https://www.calculator.net/bmi-calculator.html",
+  "steps": [
+    "Click Metric Units",
+    {
+      "instruction": "Enter \"30\" in the textbox",
+      "operation": "fill",
+      "value": "30",
+      "scope": "Row 1: Age"
+    },
+    {
+      "instruction": "Enter \"175\" in the textbox",
+      "operation": "fill",
+      "value": "175",
+      "scope": "Row 1: Height cm"
+    },
+    {
+      "instruction": "Enter \"70\" in the textbox",
+      "operation": "fill",
+      "value": "70",
+      "scope": "Row 2: Weight kg"
+    },
+    "Click Calculate",
+    "Verify the text \"BMI = 22.9\" is visible",
+    {
+      "instruction": "Enter \"90\" in the textbox",
+      "operation": "fill",
+      "value": "90",
+      "scope": "Row 2: Weight kg"
+    },
+    "Click Calculate",
+    "Verify the text \"BMI = 29.4\" is visible",
+    "Verify the text \"BMI = 22.9\" is not visible",
+    "Click Clear",
+    {
+      "instruction": "Verify \"\" is the value of the textbox",
+      "operation": "assert_value",
+      "value": "",
+      "scope": "Row 1: Height cm"
+    },
+    {
+      "instruction": "Verify \"\" is the value of the textbox",
+      "operation": "assert_value",
+      "value": "",
+      "scope": "Row 2: Weight kg"
+    }
+  ]
+}

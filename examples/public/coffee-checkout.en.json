@@ -1,0 +1,40 @@
+{
+  "interaction": {
+    "profile": "test"
+  },
+  "browser": {
+    "timeoutMs": 15000,
+    "navigationTimeoutMs": 60000
+  },
+  "costs": {
+    "maxRequests": 45,
+    "maxUsd": 0.02
+  },
+  "name": "Coffee Cart: quantities, removal and demo checkout",
+  "baseUrl": "https://coffee-cart.app/",
+  "steps": [
+    "Click Espresso",
+    "Click Cappuccino",
+    "Verify the text \"Total: $29.00\" is visible",
+    "Click Cart page",
+    "Click Add one Espresso",
+    "Verify the text \"Total: $39.00\" is visible",
+    "Click Remove one Espresso",
+    "Verify the text \"Total: $29.00\" is visible",
+    "Click Remove all Cappuccino",
+    "Verify the text \"Total: $10.00\" is visible",
+    "Click Proceed to checkout",
+    "Verify the text \"Payment details\" is visible",
+    "Enter \"DUIT Public Demo\" in Name",
+    "Enter \"duit-public-demo@example.invalid\" in Email",
+    {
+      "instruction": "Verify promotion emails checkbox starts unchecked",
+      "operation": "assert_unchecked",
+      "scope": "Promotion agreement"
+    },
+    "Click Submit",
+    "Verify the text \"Thanks for your purchase. Please check your email for payment.\" is visible",
+    "Verify the text \"cart (0)\" is visible",
+    "Verify the text \"Total: $0.00\" is visible"
+  ]
+}

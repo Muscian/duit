@@ -225,7 +225,15 @@ export class BrowserAdapter implements PlatformAdapter {
         req.isNavigationRequest() &&
         !this.origins.has(new URL(req.url()).origin)
       ) {
-        this.blockedNavigation = new URL(req.url()).origin;
+        // A blocked third-party subframe stays blocked, but must not poison
+        // an unrelated action in the allowed top-level page.
+        let topLevel = true;
+        try {
+          topLevel = !req.frame().parentFrame();
+        } catch {
+          /* Early navigation without a frame: fail closed. */
+        }
+        if (topLevel) this.blockedNavigation = new URL(req.url()).origin;
         this.networkEvent({
           kind: "navigation_blocked",
           url: diagnosticUrl(req.url()),
@@ -402,7 +410,7 @@ export class BrowserAdapter implements PlatformAdapter {
       // Neither the user nor the model can provide executable JavaScript.
       const candidates = await frame
         .locator(
-          'input,textarea,select,button,a,summary,[role],[tabindex],[onclick],[contenteditable="true"],h1,h2,h3,h4,label,p,li,td,[data-testid],div,span',
+          'input,textarea,select,button,a,summary,[role],[aria-label],[aria-labelledby],[tabindex],[onclick],[contenteditable="true"],h1,h2,h3,h4,label,p,li,td,[data-testid],div,span',
         )
         .evaluateAll(
           new Function(
@@ -417,10 +425,17 @@ export class BrowserAdapter implements PlatformAdapter {
           const siblings = Array.from(parent.children).filter(n => n.localName === tag);
           return selector(parent) + ' > ' + tag + (siblings.length > 1 ? ':nth-of-type(' + (siblings.indexOf(el)+1) + ')' : '');
         };
-        const semantic = 'input,textarea,select,button,a,summary,[role],[tabindex],[onclick],[contenteditable="true"],h1,h2,h3,h4,label,p,li,td,[data-testid]';
+        const semantic = 'input,textarea,select,button,a,summary,[role],[aria-label],[aria-labelledby],[tabindex],[onclick],[contenteditable="true"],h1,h2,h3,h4,label,p,li,td,[data-testid]';
         const parentOf = (el) => el.parentElement || (el.getRootNode() instanceof ShadowRoot ? el.getRootNode().host : null);
         const ancestors = (el) => { const result=[]; for(let p=parentOf(el);p;p=parentOf(p)) result.push(p); return result; };
-        return nodes.filter(el => el.matches(semantic) || (getComputedStyle(el).cursor === 'pointer' && !el.querySelector('button,a,[role="button"],[role="link"],div,span') && !ancestors(el).some(p=>p.matches('button,a,[role="button"],[role="link"],[tabindex],[onclick]')) && (el.textContent || '').trim().length > 0 && (el.textContent || '').trim().length < 200)).map(el => {
+        const isCustomControl = (el) => {
+          if (getComputedStyle(el).cursor !== 'pointer' || ancestors(el).some(p=>p.matches('button,a,[role="button"],[role="link"],[tabindex]'))) return false;
+          // Delegated custom widgets can have nested artwork. Prefer a named
+          // pointer region; otherwise keep only its outermost bounded text region.
+          if (el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby') || el.hasAttribute('title')) return true;
+          return getComputedStyle(parentOf(el) || el).cursor !== 'pointer' && !el.querySelector('button,a,[role],input,select,textarea,[aria-label],[aria-labelledby],[title]') && (el.textContent || '').trim().length > 0 && (el.textContent || '').trim().length < 200;
+        };
+        return nodes.filter(el => el.matches(semantic) || isCustomControl(el)).map(el => {
           const node = el;
           const input = el;
           const tag = el.localName;
@@ -428,21 +443,32 @@ export class BrowserAdapter implements PlatformAdapter {
           const label = Array.from(input.labels ?? []).map(n => n.textContent?.trim()).join(' ');
           const labelled = (el.getAttribute('aria-labelledby') ?? '').split(/\s+/).map(id => (el.getRootNode().getElementById?.(id) || el.ownerDocument.getElementById(id))?.textContent ?? '').join(' ').trim();
           const text = (node.innerText ?? el.textContent ?? '').trim().replace(/\s+/g,' ').slice(0,300);
-          const name = (el.getAttribute('aria-label') || labelled || label || el.getAttribute('title') || el.getAttribute('alt') || el.getAttribute('placeholder') || (['submit','button','reset'].includes(type) ? input.value : '') || (['input','textarea','select'].includes(tag) ? '' : text)).slice(0,300);
-          const role = el.getAttribute('role') || ({ button:'button', a:'link', select:'combobox', textarea:'textbox', summary:'button', h1:'heading',h2:'heading',h3:'heading',h4:'heading',li:'listitem' }[tag] ?? (tag === 'input' ? (['checkbox','radio'].includes(type) ? type : ['submit','button','reset'].includes(type) ? 'button' : 'textbox') : ((el.hasAttribute('onclick') || el.tabIndex >= 0 || getComputedStyle(el).cursor === 'pointer') && !ancestors(el).some(p=>p.matches('button,a,[role="button"],[role="link"],[tabindex],[onclick]'))) ? 'button' : ''));
+          const name = (el.getAttribute('aria-label') || labelled || label || el.getAttribute('title') || el.getAttribute('alt') || el.getAttribute('placeholder') || (['submit','button','reset'].includes(type) ? input.value : '') || (!text && ['a','button'].includes(tag) ? Array.from(el.querySelectorAll('img[alt]')).map(n=>n.getAttribute('alt')).filter(Boolean).join(' ') : '') || (['input','textarea','select'].includes(tag) ? '' : text)).slice(0,300);
+          const role = el.getAttribute('role') || ({ button:'button', a:'link', select:'combobox', textarea:'textbox', summary:'button', h1:'heading',h2:'heading',h3:'heading',h4:'heading',li:'listitem' }[tag] ?? (tag === 'input' ? (['checkbox','radio'].includes(type) ? type : ['submit','button','reset'].includes(type) ? 'button' : 'textbox') : (el.hasAttribute('onclick') || el.tabIndex >= 0 || isCustomControl(el)) ? 'button' : (el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby')) ? 'generic' : ''));
           const rect = el.getBoundingClientRect();
           const style = getComputedStyle(el);
           const parents = ancestors(el);
-          const visible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && ![el,...parents].some(n => n.hasAttribute('inert') || n.getAttribute('aria-hidden') === 'true');
-          const x=Math.max(0,Math.min(innerWidth-1,rect.x+rect.width/2)), y=Math.max(0,Math.min(innerHeight-1,rect.y+rect.height/2));
-          const inViewport=rect.right>0 && rect.bottom>0 && rect.left<innerWidth && rect.top<innerHeight;
+          const visible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && ![el,...parents].some(n => n.hasAttribute('inert') || n.getAttribute('aria-hidden') === 'true' || (getComputedStyle(n).opacity === '0' && !(n === el && tag === 'input' && ['checkbox','radio'].includes(type))));
+          // Hit-test the portion actually inside ancestor scrollports. A card outside
+          // a scrollport remains an eligible target: Playwright can scroll it into view.
+          let left=Math.max(0,rect.left), right=Math.min(innerWidth,rect.right), top=Math.max(0,rect.top), bottom=Math.min(innerHeight,rect.bottom);
+          for(const p of parents) {
+            const ps=getComputedStyle(p), pr=p.getBoundingClientRect();
+            if(/^(auto|scroll|hidden|clip)$/.test(ps.overflowX)) {left=Math.max(left,pr.left+p.clientLeft);right=Math.min(right,pr.left+p.clientLeft+p.clientWidth);}
+            if(/^(auto|scroll|hidden|clip)$/.test(ps.overflowY)) {top=Math.max(top,pr.top+p.clientTop);bottom=Math.min(bottom,pr.top+p.clientTop+p.clientHeight);}
+          }
+          const inViewport=right>left && bottom>top;
+          const x=Math.max(0,Math.min(innerWidth-1,(left+right)/2)), y=Math.max(0,Math.min(innerHeight-1,(top+bottom)/2));
           let hit = document.elementFromPoint(x,y);
           while(hit?.shadowRoot?.elementFromPoint(x,y) && hit.shadowRoot.elementFromPoint(x,y)!==hit) hit=hit.shadowRoot.elementFromPoint(x,y);
           const occluded = visible && inViewport && !!hit && hit !== el && !el.contains(hit) && !ancestors(hit).includes(el);
-          const overlayNode=[el,...parents].find(n=>n.matches('dialog,[role="dialog"],[aria-modal="true"]'));
+          const overlayNode=[el,...parents].find(n=>n.matches('dialog,[role="dialog"],[role="alertdialog"],[aria-modal="true"]'));
           const overlay=overlayNode ? (overlayNode.getAttribute('aria-label') || overlayNode.querySelector('h1,h2,h3,[role="heading"]')?.textContent || overlayNode.innerText || '').trim().replace(/\s+/g,' ').slice(0,300) : undefined;
           const container = el.closest('tr,[role="row"],fieldset,article,[role="group"],button,[role="button"]') || el.parentElement?.parentElement || el.parentElement;
-          const headings=parents.slice(0,8).flatMap(p=>Array.from(p.children).filter(n=>!n.contains(el) && (n.matches('h1,h2,h3,h4,legend,label') || (n.matches('div,span') && !n.querySelector('input,textarea,select,button,a,[role=button]') && (n.innerText??'').trim().length<160))).map(n=>(n.innerText??n.textContent??'').trim())).filter(Boolean);
+          const headings=parents.slice(0,8).filter(p=>!p.matches('body,html')).flatMap(p=>{
+            const children=Array.from(p.children), branch=children.findIndex(n=>n===el || n.contains(el));
+            return children.slice(0,Math.max(0,branch)).filter(n=>n.matches('h1,h2,h3,h4,legend,label') || (n.matches('div,span') && !n.querySelector('input,textarea,select,button,a,[role=button]') && (n.innerText??'').trim().length<160)).slice(-1).map(n=>(n.innerText??n.textContent??'').trim());
+          }).filter(Boolean);
           let fieldGroup;
           if(['input','textarea','select'].includes(tag)) {
             let count;
@@ -451,15 +477,18 @@ export class BrowserAdapter implements PlatformAdapter {
               if(n>1 && count===undefined)count=n;
               if(count!==undefined && n!==count)break;
               if(n===count && !p.matches('body,html') && (p.innerText??'').length<1400)fieldGroup=p;
+              if(p.matches('form,fieldset,dialog,[role="dialog"],[role="alertdialog"],[role="group"],section,article'))break;
             }
           }
           const row=el.closest('tr,[role="row"]');
           const rowContext=row?.parentElement ? 'Row '+(Array.from(row.parentElement.children).filter(n=>n.matches('tr,[role="row"]')).indexOf(row)+1)+': '+(row.innerText??'').trim().replace(/\s+/g,' ') : undefined;
-          const context=[...new Set([...(rowContext?[rowContext]:[]),...headings,...(fieldGroup?[(fieldGroup.innerText??'').trim().replace(/\s+/g,' ')]:[]),(container?.innerText ?? '').trim().replace(/\s+/g,' ')])].join(' | ').slice(0,1400);
+          const groupNames=parents.slice(0,8).map(n=>n.getAttribute('aria-label') || (n.getAttribute('aria-labelledby')??'').split(/\s+/).map(id=>(n.getRootNode().getElementById?.(id) || n.ownerDocument.getElementById(id))?.textContent??'').join(' ').trim()).filter(Boolean);
+          const context=[...new Set([...(rowContext?[rowContext]:[]),...groupNames,...headings,...(fieldGroup?[(fieldGroup.innerText??'').trim().replace(/\s+/g,' ')]:[]),(container?.innerText ?? '').trim().replace(/\s+/g,' ')])].join(' | ').slice(0,1400);
           return { tag, role, name, text: ['input','textarea','select'].includes(tag) ? '' : text, type,
             disabled: el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true', visible,
             checked: ['checkbox','radio'].includes(type) ? input.checked : ['checkbox','radio','switch'].includes(role) ? el.getAttribute('aria-checked') === 'true' : undefined,
-            occluded, overlay, href: el.hasAttribute('href') ? el.href : undefined,
+            occluded, overlay, modal: !!overlayNode && [el,...parents].some(n=>n.matches(':modal,[aria-modal="true"]')), href: el.hasAttribute('href') ? el.href : undefined,
+            placeholder: el.getAttribute('placeholder') || undefined,
             options: tag === 'select' ? Array.from(el.options).map(o => o.label) : undefined,
             context,
             css: selector(el), testId: el.getAttribute('data-testid'), label,
@@ -498,20 +527,12 @@ export class BrowserAdapter implements PlatformAdapter {
       for (const element of observed)
         elements.push({ ...element, id: `e${elements.length}` });
     }
-    const activeOverlays = new Set(
-      elements
-        .filter(
-          (e) =>
-            e.visible &&
-            !e.occluded &&
-            e.overlay &&
-            ["button", "link"].includes(e.role),
-        )
-        .map((e) => e.overlay),
+    const activeModal = elements.some(
+      (e) => e.visible && !e.occluded && e.modal,
     );
-    if (activeOverlays.size)
+    if (activeModal)
       for (const element of elements)
-        if (!element.overlay) {
+        if (!element.modal) {
           element.occluded = true;
           element.blockedByModal = true;
         }
@@ -576,11 +597,16 @@ export class BrowserAdapter implements PlatformAdapter {
     return this.withActionFence(() => this.executeWithChecks(action));
   }
   private async executeWithChecks(action: ResolvedAction): Promise<void> {
-    const textAssertion = ["assert_text", "assert_no_text"].includes(
-      action.operation,
-    );
+    const textAssertion = [
+      "assert_text",
+      "assert_no_text",
+      "assert_text_count",
+    ].includes(action.operation);
     try {
-      if (action.operation === "assert_no_text") {
+      if (
+        action.operation === "assert_no_text" ||
+        (action.operation === "assert_text_count" && action.count === 0)
+      ) {
         const error = await this.network.blankPageError();
         if (error) throw error;
       }
@@ -640,6 +666,40 @@ export class BrowserAdapter implements PlatformAdapter {
           { timeout },
         )
         .toBe(new URL(value, this.baseUrl).href);
+    } else if (op === "assert_text_count") {
+      await expect
+        .poll(
+          async () => {
+            await this.settlePopups();
+            let count = 0;
+            for (const frame of this.current().frames())
+              for (const match of await frame
+                .getByText(value, { exact: true })
+                .all())
+                if (await match.isVisible()) {
+                  if (
+                    action.scope &&
+                    !(await match.evaluate((node, scope) => {
+                      const container = node.closest(
+                        'button,article,fieldset,[role="group"],[role="row"],tr,section,dialog',
+                      );
+                      return (container?.textContent ?? "")
+                        .replace(/\s+/g, " ")
+                        .toLowerCase()
+                        .includes(scope.toLowerCase());
+                    }, action.scope))
+                  )
+                    continue;
+                  count++;
+                }
+            return count;
+          },
+          {
+            timeout,
+            message: `Expected ${action.count} visible exact matches for ${JSON.stringify(value)}`,
+          },
+        )
+        .toBe(action.count);
     } else if (op === "assert_text" || op === "assert_no_text") {
       // Any visible exact text match suffices. Duplicate hidden templates cannot make a positive assertion pass.
       await expect

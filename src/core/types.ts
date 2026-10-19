@@ -9,6 +9,7 @@ export const operations = {
   uncheck: "Uncheck a checkbox",
   press: "Press an explicit keyboard key in a control",
   goto: "Navigate to an explicitly supplied URL or path",
+  assert_text_count: "Verify the exact number of visible literal text matches",
   assert_text: "Verify that an exact literal text is visible on the page",
   assert_no_text:
     "Verify that an exact literal text is not visible on the page",
@@ -31,6 +32,7 @@ export const valueOperations = new Set<Operation>([
   "press",
   "goto",
   "assert_text",
+  "assert_text_count",
   "assert_no_text",
   "assert_value",
   "assert_url",
@@ -39,6 +41,7 @@ export const pageOperations = new Set<Operation>([
   "goto",
   "assert_url",
   "assert_text",
+  "assert_text_count",
   "assert_no_text",
 ]);
 export type ChoiceQuestion = {
@@ -138,8 +141,10 @@ export type ElementCandidate = {
   occluded?: boolean;
   blockedByModal?: boolean;
   overlay?: string;
+  modal?: boolean;
   href?: string;
   options?: string[];
+  placeholder?: string;
   context: string;
   locator: LocatorSpec;
 };
@@ -162,6 +167,7 @@ export type StepInstruction =
   | {
       instruction: string;
       operation?: Operation;
+      count?: number;
       generate?: GenerateField;
       value?: string;
       control?: { name: string; role?: string };
@@ -178,6 +184,7 @@ export type InterruptionRule = {
   maxRuns?: number;
 };
 export type CompiledStep = {
+  count?: number;
   literalValue?: boolean;
   generate?: GenerateField;
   control?: { name: string; role?: string };
@@ -231,7 +238,18 @@ export interface PlatformAdapter {
   close(): Promise<void>;
   diagnostics?(): PlatformDiagnostics;
 }
+export type InteractionOptions = {
+  profile?: "manual" | "test";
+  cookies?: "manual" | "accept" | "reject";
+  onboarding?: "manual" | "dismiss";
+  reminders?: "manual" | "later";
+  unsavedChanges?: "manual" | "discard";
+  maxActions?: number;
+  exactLabelWaitMs?: number;
+};
 export type CaseSpec = {
+  interaction?: InteractionOptions;
+  decisionContext?: string;
   privacy?: PrivacyOptions;
   platform?: string;
   content?: ContentOptions;
@@ -259,6 +277,7 @@ export type DecisionEvent = {
   response: DecisionResponse;
 };
 export type StepResult = {
+  assertionRecoveries?: Array<{ error: string; notices: string[] }>;
   failure?: FailureInfo;
   index: number;
   text: string;

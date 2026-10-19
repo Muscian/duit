@@ -1,0 +1,128 @@
+{
+  "name": "TodoMVC Playwright demo: lifecycle, filters, persistence and cleanup",
+  "baseUrl": "https://demo.playwright.dev/todomvc/",
+  "interaction": {
+    "profile": "test"
+  },
+  "browser": {
+    "timeoutMs": 10000,
+    "navigationTimeoutMs": 60000
+  },
+  "costs": {
+    "maxRequests": 35,
+    "maxUsd": 0.02
+  },
+  "steps": [
+    {
+      "instruction": "Enter \"DUIT draft proposal\" in New Todo Input",
+      "operation": "fill",
+      "control": {
+        "name": "What needs to be done?",
+        "role": "textbox"
+      },
+      "value": "DUIT draft proposal"
+    },
+    {
+      "instruction": "Commit new task with Enter",
+      "operation": "press",
+      "control": {
+        "name": "What needs to be done?",
+        "role": "textbox"
+      },
+      "value": "Enter"
+    },
+    {
+      "instruction": "Verify the text \"DUIT draft proposal\" is visible",
+      "operation": "assert_text",
+      "value": "DUIT draft proposal"
+    },
+    {
+      "instruction": "Enter \"DUIT review proposal\" in New Todo Input",
+      "operation": "fill",
+      "control": {
+        "name": "What needs to be done?",
+        "role": "textbox"
+      },
+      "value": "DUIT review proposal"
+    },
+    {
+      "instruction": "Commit new task with Enter",
+      "operation": "press",
+      "control": {
+        "name": "What needs to be done?",
+        "role": "textbox"
+      },
+      "value": "Enter"
+    },
+    {
+      "instruction": "Verify the text \"DUIT review proposal\" is visible",
+      "operation": "assert_text",
+      "value": "DUIT review proposal"
+    },
+    {
+      "instruction": "Enter \"DUIT publish proposal\" in New Todo Input",
+      "operation": "fill",
+      "control": {
+        "name": "What needs to be done?",
+        "role": "textbox"
+      },
+      "value": "DUIT publish proposal"
+    },
+    {
+      "instruction": "Commit new task with Enter",
+      "operation": "press",
+      "control": {
+        "name": "What needs to be done?",
+        "role": "textbox"
+      },
+      "value": "Enter"
+    },
+    {
+      "instruction": "Verify the text \"DUIT publish proposal\" is visible",
+      "operation": "assert_text",
+      "value": "DUIT publish proposal"
+    },
+    {
+      "instruction": "Complete the checkbox for DUIT review proposal",
+      "operation": "check",
+      "scope": "DUIT review proposal"
+    },
+    "Click Active",
+    "Verify the text \"DUIT review proposal\" is not visible",
+    "Verify the text \"DUIT draft proposal\" is visible",
+    "Click Completed",
+    "Verify the text \"DUIT review proposal\" is visible",
+    "Verify the text \"DUIT draft proposal\" is not visible",
+    "Click All",
+    {
+      "instruction": "Reload the app to verify stored tasks",
+      "operation": "goto",
+      "value": "https://demo.playwright.dev/todomvc/"
+    },
+    "Verify the text \"DUIT publish proposal\" is visible",
+    "Click Clear completed",
+    "Verify the text \"DUIT review proposal\" is not visible",
+    {
+      "instruction": "Complete the checkbox for DUIT draft proposal",
+      "operation": "check",
+      "scope": "DUIT draft proposal"
+    },
+    {
+      "instruction": "Complete the checkbox for DUIT publish proposal",
+      "operation": "check",
+      "scope": "DUIT publish proposal"
+    },
+    "Click Clear completed",
+    "Verify the text \"DUIT draft proposal\" is not visible",
+    "Verify the text \"DUIT publish proposal\" is not visible",
+    {
+      "instruction": "Verify new task field remains empty",
+      "operation": "assert_value",
+      "control": {
+        "name": "What needs to be done?",
+        "role": "textbox"
+      },
+      "value": ""
+    }
+  ]
+}

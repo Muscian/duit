@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import "./load-env.js";
+import { summarizeObservation } from "./core/inspection.js";
 import { createInterface } from "node:readline";
 import { HarnessSession } from "./core/session.js";
 import { parseArgs } from "node:util";
@@ -14,13 +15,14 @@ import { lazyWriter } from "./providers/openai-content.js";
 import { caseJsonSchema, validateCase } from "./core/authoring.js";
 import { BrowserAdapter, type BrowserOptions } from "./platforms/browser.js";
 
-const help = `duit — UI tests with Jev decisions and an optional field writer\n\n  npm run duit -- schema | validate case.yaml | serve | mcp\n  npm run duit -- run case.yaml [options]\n  npm run duit -- run steps.txt --base-url http://localhost:4173\n  npm run duit -- replay artifacts/<run>/replay.json [options]\n  npm run duit -- explore case.yaml [options]  # Retain browser after a blocked step\n\nOptions:\n  --visual              Enable experimental Jev screenshot click fallback\n  --max-requests N      Stop new Jev calls after this per-run limit\n  --max-cost-usd N      Stop new calls after reported spend reaches this estimate\n  --port N              Local API port (default 4318); DUIT_API_TOKEN sets bearer token\n  --base-url URL         Override starting URL (required for .txt/.md)\n  --out DIRECTORY       New artifact directory (must not already exist)\n  --browser NAME        chromium (default), firefox, webkit\n  --channel NAME        Chromium distribution: chrome, msedge, chromium (fresh session)\n  --allow-local-network-origin URL  Grant local-network access to this page origin; repeatable\n  --proxy URL           Override browser proxy; default inherits HTTP(S)_PROXY. Use "direct" to opt out\n  --headed              Show the browser\n  --timeout MS          Playwright action/assertion timeout (default 5000)\n  --navigation-timeout MS  Document and SPA readiness timeout (default 30000)\n  --budget MS           Whole-run deadline (default 300000)\n  --min-probability N    Decision threshold 0..1 (default 0.70)\n  --allow-origin URL    Allow additional navigation origin; repeatable\n  --storage-state FILE  Playwright authentication state\n  --trace               Record an unredacted Playwright trace (opt in)\n  --no-screenshots       Disable masked screenshots\n\nCorporate policy: DUIT_PRIVACY_MODE=restricted|local; DUIT_MODEL_ALLOWED_ORIGINS=origin,...\n\nExit codes: 0 passed, 1 assertion/action failed, 2 blocked/configuration error.\n`;
+const help = `duit — UI tests with Jev decisions and an optional field writer\n\n  npm run duit -- schema | validate case.yaml | serve | mcp\n  npm run duit -- run case.yaml [options]\n  npm run duit -- run steps.txt --base-url http://localhost:4173\n  npm run duit -- replay artifacts/<run>/replay.json [options]\n  npm run duit -- explore case.yaml [options]  # Retain browser after a blocked step\n\nOptions:\n  --interaction-profile NAME  manual (default) or test (accept cookies, dismiss onboarding, defer reminders, discard unsaved test drafts)\n  --visual              Enable experimental Jev screenshot click fallback\n  --max-requests N      Stop new Jev calls after this per-run limit\n  --max-cost-usd N      Stop new calls after reported spend reaches this estimate\n  --port N              Local API port (default 4318); DUIT_API_TOKEN sets bearer token\n  --base-url URL         Override starting URL (required for .txt/.md)\n  --out DIRECTORY       New artifact directory (must not already exist)\n  --browser NAME        chromium (default), firefox, webkit\n  --channel NAME        Chromium distribution: chrome, msedge, chromium (fresh session)\n  --allow-local-network-origin URL  Grant local-network access to this page origin; repeatable\n  --proxy URL           Override browser proxy; default inherits HTTP(S)_PROXY. Use "direct" to opt out\n  --headed              Show the browser\n  --timeout MS          Playwright action/assertion timeout (default 5000)\n  --navigation-timeout MS  Document and SPA readiness timeout (default 30000)\n  --budget MS           Whole-run deadline (default 300000)\n  --min-probability N    Decision threshold 0..1 (default 0.70)\n  --allow-origin URL    Allow additional navigation origin; repeatable\n  --storage-state FILE  Playwright authentication state\n  --trace               Record an unredacted Playwright trace (opt in)\n  --no-screenshots       Disable masked screenshots\n\nCorporate policy: DUIT_PRIVACY_MODE=restricted|local; DUIT_MODEL_ALLOWED_ORIGINS=origin,...\n\nExit codes: 0 passed, 1 assertion/action failed, 2 blocked/configuration error.\n`;
 async function main() {
   const { values: v, positionals: p } = parseArgs({
     allowPositionals: true,
     options: {
       help: { type: "boolean", short: "h" },
       visual: { type: "boolean" },
+      "interaction-profile": { type: "string" },
       "max-requests": { type: "string" },
       "max-cost-usd": { type: "string" },
       port: { type: "string" },
@@ -143,6 +145,14 @@ async function main() {
       ),
   );
   await mkdir(resolve(out, ".."), { recursive: true });
+  if (v["interaction-profile"]) {
+    if (!["manual", "test"].includes(v["interaction-profile"]))
+      throw new Error("Invalid interaction profile; use manual or test");
+    spec.interaction = {
+      ...spec.interaction,
+      profile: v["interaction-profile"] as "manual" | "test",
+    };
+  }
   if (v.visual) spec.visual = { ...spec.visual, enabled: true };
   if (v["max-requests"] || v["max-cost-usd"])
     spec.costs = {
@@ -245,28 +255,7 @@ async function main() {
               if (line === ":continue") await continuePlan();
               else if (line === ":inspect") {
                 const o = await session.inspect();
-                console.log(
-                  JSON.stringify(
-                    {
-                      url: o.url,
-                      title: o.title,
-                      dialogs: o.dialogs,
-                      text: o.text,
-                      controls: o.elements
-                        .filter((e) => e.visible && !e.occluded)
-                        .map((e) => ({
-                          role: e.role,
-                          name: e.name,
-                          context: e.context,
-                          checked: e.checked,
-                          disabled: e.disabled,
-                          overlay: e.overlay,
-                        })),
-                    },
-                    null,
-                    2,
-                  ),
-                );
+                console.log(JSON.stringify(summarizeObservation(o), null, 2));
               } else if (line === ":screenshot")
                 console.log(await session.capture());
               else if (line === ":retry" || line.startsWith(":retry ")) {

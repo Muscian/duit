@@ -91,6 +91,7 @@ export function privateStep(
     evidence: _e,
     screenshot: _s,
     visualScreenshot: _v,
+    assertionRecoveries: _recoveries,
     action,
     error,
     ...rest

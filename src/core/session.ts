@@ -47,6 +47,7 @@ export class HarnessSession {
   private started = performance.now();
   private closed = false;
   private busy = false;
+  private inspections = 0;
   private signal: AbortSignal;
   private abort = () => {
     void this.options.platform.close().catch(() => {});
@@ -97,6 +98,7 @@ export class HarnessSession {
       policy,
       this.sanitize,
       privacy,
+      this.spec.decisionContext,
     );
     this.rawReport = {
       privacy,
@@ -132,6 +134,7 @@ export class HarnessSession {
       engine: this.engine,
       variables,
       interruptions: this.spec.interruptions,
+      interaction: this.spec.interaction,
       visual: this.spec.visual,
       writer: this.writer,
       onVisualFrame:
@@ -194,9 +197,19 @@ export class HarnessSession {
         })),
       };
     }
-    return JSON.parse(
+    const safe = JSON.parse(
       this.sanitize(JSON.stringify(observation)),
     ) as Observation;
+    // Inspection is itself evidence and must survive session closure.
+    await writeFile(
+      join(
+        this.rawReport.artifactsDir,
+        `inspection-${String(++this.inspections).padStart(3, "0")}.json`,
+      ),
+      JSON.stringify(safe, null, 2),
+      { mode: 0o600 },
+    );
+    return safe;
   }
   async capture() {
     this.active();

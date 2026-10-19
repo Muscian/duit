@@ -72,6 +72,8 @@ This permission is scoped to that origin in each fresh context. Add `--channel c
 
 Use `npm run duit -- explore case.yaml` to retain the browser after a blocked step. Inspect the current UI with `:inspect`, correct a pre-dispatch failure with `:retry`, and resume the plan with `:continue`. An uncertain dispatched action must be verified with `:confirm`, never blindly repeated.
 
+Configure routine test preferences once with `interaction: {profile: test}` (cookies, onboarding, reminders and unsaved test drafts), with per-category overrides. `decisionContext` supplies shared vocabulary to Jev. The default is manual.
+
 Cases can declare expected `interruptions`, page `context`, control `scope`, explicit name `aliases`, and UI `cleanup`. See [runtime authoring](docs/runtime-authoring.md) for the commands and recovery guarantees, and [Omni Header Injection](docs/omni-header-injection.md) for the real UI-only flow and its validation result.
 
 ## Faster adoption and model costs
@@ -79,6 +81,7 @@ Cases can declare expected `interruptions`, page `context`, control `scope`, exp
 - [API, MCP and skills](docs/integrations.md): use DUIT from your model or application, inspect unfamiliar UIs and resume retained sessions.
 - [Visual fallback, optional writer and budgets](docs/visual-writing-costs.md): Jev screenshot/box clicks, authored or generated field values, per-run token/USD estimates and limits.
 - [Public-site validation](docs/public-validation.md): forms, delayed controls, frames, popups, changing labels and real visual targeting.
+- [Cross-site workflows](docs/public-workflows.md): frozen first attempts, checkout, task persistence, financial calculations, unchanged-case harness retries and replay.
 
 ```bash
 npm run duit -- validate examples/public/selenium-form.en.yaml
@@ -117,7 +120,7 @@ Available operations:
 
 | Action                                           | Assertion                                        |
 | ------------------------------------------------ | ------------------------------------------------ |
-| Click, fill/replace text, select a native option | Exact visible / absent text                      |
+| Click, fill/replace text, select a native option | Exact visible / absent text and text counts      |
 | Check/uncheck a checkbox, select a radio button  | Element visible / hidden                         |
 | Press an explicit key, navigate to a URL/path    | Exact value, checked/unchecked, enabled/disabled |
 |                                                  | Exact URL (paths resolve against `baseUrl`)      |

@@ -1,3 +1,4 @@
+import { summarizeObservation } from "../core/inspection.js";
 import { readFile, stat } from "node:fs/promises";
 import type { ContentProvider } from "../core/content.js";
 import { randomUUID } from "node:crypto";
@@ -282,19 +283,7 @@ export class DuitService {
     return this.exclusive(id, async (e) => {
       const o = await e.session.inspect();
       return {
-        url: o.url,
-        title: o.title,
-        text: o.text?.slice(0, 8000),
-        dialogs: o.dialogs,
-        controls: o.elements
-          .filter((c) => c.visible)
-          .slice(0, 80)
-          .map((c) => ({
-            name: c.name,
-            role: c.role,
-            context: c.context,
-            disabled: c.disabled,
-          })),
+        ...summarizeObservation(o),
         usage: e.session.report.usage,
       };
     });
